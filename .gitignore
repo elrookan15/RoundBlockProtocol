@@ -1,0 +1,46 @@
+# --- Rust / Anchor build output ---
+/target/*
+!/target/deploy
+/target/deploy/*
+# Deployment keypairs must NEVER be committed — they control program upgrades.
+# Generate and store them in protected CI/CD secrets or a hardware wallet.
+# NOTE: target/deploy/league_escrow-keypair.json was previously committed and
+# must be treated as compromised. Rotate the upgrade authority before any
+# value-bearing deployment. Removal from Git history requires repository-owner
+# action (e.g., git-filter-repo or BFG Repo Cleaner) and a force-push.
+target/deploy/*-keypair.json
+.anchor/
+test-ledger/
+**/*.rs.bk
+
+# --- Node ---
+node_modules/
+.pnp
+.pnp.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Next.js frontend ---
+app/.next/
+app/out/
+app/build/
+app/next-env.d.ts
+
+# --- Env / secrets ---
+.env
+.env*.local
+*.pem
+wallet.json
+!.env.example
+
+# --- Editor / OS ---
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.swp
+
+# TS build info
+*.tsbuildinfo

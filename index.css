@@ -1,0 +1,55 @@
+/*
+ * RoundBlock Protocol — app-level utility classes.
+ *
+ * Referenced by index.html (<link rel="stylesheet" href="/index.css">).
+ * These classes are used throughout the components but were previously
+ * undefined, so the intended visual effects never rendered.
+ */
+
+/* Monospace helper (used alongside Tailwind utilities, e.g. `text-xs mono`). */
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Thin, themed scrollbar for scrollable panels. */
+.custom-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 242, 255, 0.35) transparent;
+}
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 242, 255, 0.25);
+  border-radius: 10px;
+}
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 242, 255, 0.45);
+}
+
+/* Fully hide the scrollbar while keeping the element scrollable. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Green neon glow for active neural-link elements (box + text variants). */
+.glow-green {
+  box-shadow:
+    0 0 12px rgba(57, 255, 20, 0.55),
+    0 0 28px rgba(57, 255, 20, 0.35),
+    inset 0 0 12px rgba(57, 255, 20, 0.25);
+}
+.text-glow-green {
+  color: var(--neon-green, #39ff14);
+  text-shadow:
+    0 0 8px rgba(57, 255, 20, 0.6),
+    0 0 18px rgba(57, 255, 20, 0.35);
+}
