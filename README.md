@@ -62,17 +62,17 @@ The program supports **two currencies** chosen at league creation: native SOL
 and any SPL token (e.g. USDC). Fund movement is currency-specific; the lifecycle
 (`lock`/`resolve`) is shared.
 
-| Instruction         | Who             | Effect |
-| ------------------- | --------------- | ------ |
-| `create_league`     | anyone (admin)  | Initializes a **SOL** league with entry fee, max players, and an oracle authority. |
-| `create_league_spl` | anyone (admin)  | Same, for an **SPL-token** league; also creates the vault ATA owned by the league PDA. |
-| `join_league`       | any player      | Deposits the SOL entry fee into the league PDA and registers a `PlayerEntry`. |
-| `join_league_spl`   | any player      | Transfers the SPL entry fee from the player's ATA into the vault and registers a `PlayerEntry`. |
-| `lock_league`       | admin only      | Closes entries (`Open → Locked`). Currency-agnostic. |
-| `resolve_league`    | admin or oracle | Records winner(s) and their split (`Locked → Resolved`). Validated: sum ≤ pot, no duplicates, count ≤ players. Currency-agnostic. |
-| `claim_payout`      | winning player  | Withdraws the caller's SOL share from the league PDA exactly once. |
-| `claim_payout_spl`  | winning player  | Transfers the caller's SPL share from the vault (signed by the league PDA) to their ATA, exactly once. |
-| `cancel_league`     | admin only      | Cancels an under-subscribed/abandoned league (`Open → Cancelled`). Only allowed before locking. |
+| Instruction         | Who             | Effect                                                                                                                                     |
+| ------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create_league`     | anyone (admin)  | Initializes a **SOL** league with entry fee, max players, and an oracle authority.                                                         |
+| `create_league_spl` | anyone (admin)  | Same, for an **SPL-token** league; also creates the vault ATA owned by the league PDA.                                                     |
+| `join_league`       | any player      | Deposits the SOL entry fee into the league PDA and registers a `PlayerEntry`.                                                              |
+| `join_league_spl`   | any player      | Transfers the SPL entry fee from the player's ATA into the vault and registers a `PlayerEntry`.                                            |
+| `lock_league`       | admin only      | Closes entries (`Open → Locked`). Currency-agnostic.                                                                                       |
+| `resolve_league`    | admin or oracle | Records winner(s) and their split (`Locked → Resolved`). Validated: sum ≤ pot, no duplicates, count ≤ players. Currency-agnostic.          |
+| `claim_payout`      | winning player  | Withdraws the caller's SOL share from the league PDA exactly once.                                                                         |
+| `claim_payout_spl`  | winning player  | Transfers the caller's SPL share from the vault (signed by the league PDA) to their ATA, exactly once.                                     |
+| `cancel_league`     | admin only      | Cancels an under-subscribed/abandoned league (`Open → Cancelled`). Only allowed before locking.                                            |
 | `refund`            | any player      | Reclaims the caller's SOL deposit from a `Cancelled` league; closes their `PlayerEntry` PDA (rent returned) so it can't be refunded twice. |
 | `refund_spl`        | any player      | Reclaims the caller's SPL deposit from a `Cancelled` league; closes their `PlayerEntry` PDA (rent returned) so it can't be refunded twice. |
 
