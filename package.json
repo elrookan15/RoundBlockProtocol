@@ -5,8 +5,9 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "lint": "prettier \"tests/**/*.ts\" --check",
-    "lint:fix": "prettier \"tests/**/*.ts\" -w"
+    "lint": "prettier --check . --ignore-unknown",
+    "lint:fix": "prettier --write . --ignore-unknown",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
