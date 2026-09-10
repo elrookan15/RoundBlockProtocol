@@ -5,8 +5,11 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "lint": "prettier \"tests/**/*.ts\" --check",
-    "lint:fix": "prettier \"tests/**/*.ts\" -w"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "prettier --check . --ignore-unknown",
+    "lint:fix": "prettier -w . --ignore-unknown",
+    "test": "ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
