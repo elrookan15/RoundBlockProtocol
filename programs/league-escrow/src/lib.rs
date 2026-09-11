@@ -139,15 +139,33 @@ pub mod league_escrow {
             ErrorCode::InvalidWinners
         );
 
+        let league_key = league.key();
         let mut total_payout: u64 = 0;
         let mut winners = Vec::with_capacity(winner_inputs.len());
 
-        for input in winner_inputs {
+        for input in &winner_inputs {
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
             require!(
                 !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
                 ErrorCode::InvalidWinners
             );
+
+            if !ctx.remaining_accounts.is_empty() {
+                let (expected_entry_pda, _) = Pubkey::find_program_address(
+                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
+                    ctx.program_id,
+                );
+                let entry_acc = ctx
+                    .remaining_accounts
+                    .iter()
+                    .find(|acc| acc.key() == expected_entry_pda)
+                    .ok_or(ErrorCode::InvalidWinnerEntry)?;
+                require!(
+                    entry_acc.owner == ctx.program_id,
+                    ErrorCode::InvalidWinnerEntry
+                );
+            }
+
             winners.push(WinnerSplit {
                 winner: input.winner,
                 payout: input.payout,
@@ -280,6 +298,9 @@ pub mod league_escrow {
                 .ok_or(ErrorCode::Overflow)?;
         }
 
+        league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
+        league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+
         Ok(())
     }
 
@@ -312,6 +333,75 @@ pub mod league_escrow {
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
             token::transfer(cpi_ctx, entry_fee)?;
         }
+
+        league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
+        league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+
+        Ok(())
+    }
+
+    pub fn close_league(ctx: Context<CloseLeague>) -> Result<()> {
+        let league = &ctx.accounts.league;
+        require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+
+        match league.status {
+            LeagueStatus::Resolved => {
+                require!(
+                    league.winners.iter().all(|w| w.claimed),
+                    ErrorCode::UnclaimedPayouts
+                );
+            }
+            LeagueStatus::Cancelled => {
+                require!(
+                    league.player_count == 0,
+                    ErrorCode::UnclaimedRefunds
+                );
+            }
+            _ => return err!(ErrorCode::InvalidLeagueStatus),
+        }
+
+        Ok(())
+    }
+
+    pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
+        let league = &ctx.accounts.league;
+        require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+
+        match league.status {
+            LeagueStatus::Resolved => {
+                require!(
+                    league.winners.iter().all(|w| w.claimed),
+                    ErrorCode::UnclaimedPayouts
+                );
+            }
+            LeagueStatus::Cancelled => {
+                require!(
+                    league.player_count == 0,
+                    ErrorCode::UnclaimedRefunds
+                );
+            }
+            _ => return err!(ErrorCode::InvalidLeagueStatus),
+        }
+
+        let admin_key = league.admin;
+        let league_id_bytes = league.league_id.to_le_bytes();
+        let bump = league.bump;
+        let seeds = &[
+            b"league",
+            admin_key.as_ref(),
+            league_id_bytes.as_ref(),
+            &[bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = token::CloseAccount {
+            account: ctx.accounts.vault.to_account_info(),
+            destination: ctx.accounts.admin.to_account_info(),
+            authority: league.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+        token::close_account(cpi_ctx)?;
 
         Ok(())
     }
@@ -549,6 +639,44 @@ pub struct RefundSpl<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct CloseLeague<'info> {
+    #[account(
+        mut,
+        close = admin,
+        has_one = admin,
+        seeds = [b"league", admin.key().as_ref(), league.league_id.to_le_bytes().as_ref()],
+        bump = league.bump,
+    )]
+    pub league: Account<'info, League>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseLeagueSpl<'info> {
+    #[account(
+        mut,
+        close = admin,
+        has_one = admin,
+        seeds = [b"league", admin.key().as_ref(), league.league_id.to_le_bytes().as_ref()],
+        bump = league.bump,
+    )]
+    pub league: Account<'info, League>,
+    #[account(
+        mut,
+        seeds = [b"vault", league.key().as_ref()],
+        bump = league.vault_bump,
+        token::mint = payment_mint,
+        token::authority = league,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+    pub payment_mint: Account<'info, Mint>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+}
+
 #[account]
 pub struct League {
     pub admin: Pubkey,
@@ -645,4 +773,12 @@ pub enum ErrorCode {
     InvalidMaxPlayers,
     #[msg("Insufficient funds in escrow vault/account.")]
     InsufficientFunds,
+    #[msg("Unclaimed payouts remain in the league.")]
+    UnclaimedPayouts,
+    #[msg("Unclaimed refunds remain in the league.")]
+    UnclaimedRefunds,
+    #[msg("League status does not allow closing.")]
+    InvalidLeagueStatus,
+    #[msg("Invalid winner entry account.")]
+    InvalidWinnerEntry,
 }

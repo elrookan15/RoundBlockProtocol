@@ -15,6 +15,7 @@ test-ledger/
 
 # --- Node ---
 node_modules/
+dist/
 .pnp
 .pnp.js
 npm-debug.log*

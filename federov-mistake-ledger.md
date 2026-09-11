@@ -45,3 +45,14 @@ corrective_rule: Calculate account space dynamically based on input parameters u
 regression_test: `tests/league-escrow.ts` test case for `max_players = 12`
 confidence_adjustment: Flag fixed-size `space` calculations on dynamic structs in Anchor as Medium risk until verified against parameter bounds
 source: audit sweep
+
+## M-005
+
+date: 2026-09-12
+trigger_pattern: Escrow refund path closing player PDA without updating parent `League` state fields (`player_count`, `total_pot`) or supporting rent reclamation on termination
+bad_assumption: Assumed closing the `PlayerEntry` PDA alone was sufficient for refunds without updating `player_count` and `total_pot` on `League`
+what_actually_happened: `League` account maintained stale `player_count` and `total_pot` metrics after refunds, breaking downstream lifecycle state assertions and blocking clean protocol rent reclamation on league close
+corrective_rule: Always pair PDA account closures with checked decrements on parent state fields (`player_count.checked_sub`, `total_pot.checked_sub`) and provide explicit account close handlers (`close_league`) to reclaim rent lamports for terminal states
+regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
+confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
+source: audit sweep

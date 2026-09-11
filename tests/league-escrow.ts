@@ -15,6 +15,7 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
+import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -91,42 +92,24 @@ describe("league-escrow", () => {
     let entry2Pda: PublicKey;
 
     before(() => {
-      [leaguePda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("league"),
-          admin.publicKey.toBuffer(),
-          leagueId.toArrayLike(Buffer, "le", 8),
-        ],
+      [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
+      [entry1Pda] = findEntryPda(
+        leaguePda,
+        player1.publicKey,
         program.programId,
       );
-
-      [entry1Pda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("entry"),
-          leaguePda.toBuffer(),
-          player1.publicKey.toBuffer(),
-        ],
-        program.programId,
-      );
-
-      [entry2Pda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("entry"),
-          leaguePda.toBuffer(),
-          player2.publicKey.toBuffer(),
-        ],
+      [entry2Pda] = findEntryPda(
+        leaguePda,
+        player2.publicKey,
         program.programId,
       );
     });
 
     it("Fails to create a league with max_players = 0", async () => {
       const zeroId = new anchor.BN(999);
-      const [zeroPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("league"),
-          admin.publicKey.toBuffer(),
-          zeroId.toArrayLike(Buffer, "le", 8),
-        ],
+      const [zeroPda] = findLeaguePda(
+        admin.publicKey,
+        zeroId,
         program.programId,
       );
 
@@ -227,8 +210,23 @@ describe("league-escrow", () => {
       expect(account.winners.length).to.equal(2);
     });
 
-    it("Claims payout for player 1", async () => {
-      const preBalance = await provider.connection.getBalance(
+    it("Fails to close league before all payouts are claimed", async () => {
+      try {
+        await (program.methods as any)
+          .closeLeague()
+          .accounts({
+            league: leaguePda,
+            admin: admin.publicKey,
+          })
+          .rpc();
+        expect.fail("Should have failed with UnclaimedPayouts");
+      } catch (err: any) {
+        expect(err.toString()).to.include("UnclaimedPayouts");
+      }
+    });
+
+    it("Claims payout for player 1 and player 2 then closes league", async () => {
+      const preBalance1 = await provider.connection.getBalance(
         player1.publicKey,
       );
 
@@ -241,10 +239,162 @@ describe("league-escrow", () => {
         .signers([player1])
         .rpc();
 
-      const postBalance = await provider.connection.getBalance(
+      const postBalance1 = await provider.connection.getBalance(
         player1.publicKey,
       );
-      expect(postBalance).to.be.greaterThan(preBalance);
+      expect(postBalance1).to.be.greaterThan(preBalance1);
+
+      await (program.methods as any)
+        .claimPayout()
+        .accounts({
+          league: leaguePda,
+          winner: player2.publicKey,
+        })
+        .signers([player2])
+        .rpc();
+
+      await (program.methods as any)
+        .closeLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
+    });
+  });
+
+  describe("Cancel and Refund Path with State Integrity Checks", () => {
+    const leagueId = new anchor.BN(404);
+    const entryFee = new anchor.BN(50000000); // 0.05 SOL
+    const maxPlayers = 2;
+
+    let leaguePda: PublicKey;
+    let entry1Pda: PublicKey;
+    let entry2Pda: PublicKey;
+
+    before(() => {
+      [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
+      [entry1Pda] = findEntryPda(
+        leaguePda,
+        player1.publicKey,
+        program.programId,
+      );
+      [entry2Pda] = findEntryPda(
+        leaguePda,
+        player2.publicKey,
+        program.programId,
+      );
+    });
+
+    it("Creates league and players join", async () => {
+      await (program.methods as any)
+        .createLeague(leagueId, entryFee, maxPlayers)
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+          oracle: oracle.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .joinLeague()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          player: player1.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .joinLeague()
+        .accounts({
+          league: leaguePda,
+          entry: entry2Pda,
+          player: player2.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([player2])
+        .rpc();
+
+      const account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.playerCount).to.equal(2);
+      expect(account.totalPot.toNumber()).to.equal(100000000);
+    });
+
+    it("Cancels league and refunds player 1 with state decrements", async () => {
+      await (program.methods as any)
+        .cancelLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .refund()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          player: player1.publicKey,
+        })
+        .signers([player1])
+        .rpc();
+
+      const account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.playerCount).to.equal(1);
+      expect(account.totalPot.toNumber()).to.equal(50000000);
+    });
+
+    it("Fails to close league while player 2 has not refunded", async () => {
+      try {
+        await (program.methods as any)
+          .closeLeague()
+          .accounts({
+            league: leaguePda,
+            admin: admin.publicKey,
+          })
+          .rpc();
+        expect.fail("Should have failed with UnclaimedRefunds");
+      } catch (err: any) {
+        expect(err.toString()).to.include("UnclaimedRefunds");
+      }
+    });
+
+    it("Refunds player 2 and closes cancelled league", async () => {
+      await (program.methods as any)
+        .refund()
+        .accounts({
+          league: leaguePda,
+          entry: entry2Pda,
+          player: player2.publicKey,
+        })
+        .signers([player2])
+        .rpc();
+
+      const account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.playerCount).to.equal(0);
+      expect(account.totalPot.toNumber()).to.equal(0);
+
+      await (program.methods as any)
+        .closeLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
     });
   });
 
@@ -256,14 +406,7 @@ describe("league-escrow", () => {
     let leaguePda: PublicKey;
 
     before(() => {
-      [leaguePda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("league"),
-          admin.publicKey.toBuffer(),
-          leagueId.toArrayLike(Buffer, "le", 8),
-        ],
-        program.programId,
-      );
+      [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
     });
 
     it("Creates a large SOL league with max_players = 12", async () => {
@@ -292,26 +435,11 @@ describe("league-escrow", () => {
     let entry1Pda: PublicKey;
 
     before(() => {
-      [leaguePda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("league"),
-          admin.publicKey.toBuffer(),
-          leagueId.toArrayLike(Buffer, "le", 8),
-        ],
-        program.programId,
-      );
-
-      [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), leaguePda.toBuffer()],
-        program.programId,
-      );
-
-      [entry1Pda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("entry"),
-          leaguePda.toBuffer(),
-          player1.publicKey.toBuffer(),
-        ],
+      [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
+      [vaultPda] = findVaultPda(leaguePda, program.programId);
+      [entry1Pda] = findEntryPda(
+        leaguePda,
+        player1.publicKey,
         program.programId,
       );
     });
