@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: On-chain loop performing iterative `Pubkey::find_program_address` for remaining accounts and SPL token vault close without handling residual token balances
+bad_assumption: Assumed `find_program_address` inside loops and bare `token::close_account` calls on SPL vaults would be compute-efficient and succeed without residual token handling
+what_actually_happened: Iterative bump search in `find_program_address` consumed excessive compute units (1000-2000 CUs per winner), and `close_league_spl` failed on non-zero vault balances when partial payout distributions left residual tokens
+corrective_rule: Use `create_program_address` with stored PDA bump seeds for O(1) compute verification in on-chain loops, and support optional token account sweeps (`admin_token`) before invoking `token::close_account`
+regression_test: `tests/league-escrow.ts` test case for "SPL/USDC League Full Lifecycle" with remaining accounts resolution and close_league_spl vault sweep
+confidence_adjustment: Flag on-chain iterative PDA searches inside loops as High CU risk and verify SPL vault close procedures against non-zero balance edge cases
+source: audit sweep

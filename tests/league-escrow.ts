@@ -15,7 +15,13 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  calculateLeagueSpace,
+  getLeagueStatusName,
+} from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -28,6 +34,7 @@ describe("league-escrow", () => {
   const player2 = Keypair.generate();
 
   let mint: PublicKey;
+  let adminTokenAccount: PublicKey;
   let player1TokenAccount: PublicKey;
   let player2TokenAccount: PublicKey;
 
@@ -51,6 +58,12 @@ describe("league-escrow", () => {
     );
 
     // Create SPL token accounts and mint tokens
+    adminTokenAccount = await createAccount(
+      provider.connection,
+      admin,
+      mint,
+      admin.publicKey,
+    );
     player1TokenAccount = await createAccount(
       provider.connection,
       admin,
@@ -80,6 +93,33 @@ describe("league-escrow", () => {
       admin,
       1000000000,
     );
+  });
+
+  describe("SDK Utility Functions & Space Calculations", () => {
+    it("Calculates correct space for league account capacity", () => {
+      const space10 = calculateLeagueSpace(10);
+      expect(space10).to.equal(
+        8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + (4 + 10 * 41) + 1 + 1,
+      );
+      expect(() => calculateLeagueSpace(0)).to.throw(RangeError);
+      expect(() => calculateLeagueSpace(256)).to.throw(RangeError);
+    });
+
+    it("Correctly maps league status objects and strings to status names", () => {
+      expect(getLeagueStatusName({ open: {} })).to.equal("Open");
+      expect(getLeagueStatusName({ locked: {} })).to.equal("Locked");
+      expect(getLeagueStatusName({ resolved: {} })).to.equal("Resolved");
+      expect(getLeagueStatusName({ cancelled: {} })).to.equal("Cancelled");
+      expect(getLeagueStatusName("Open")).to.equal("Open");
+      expect(getLeagueStatusName("InvalidStatus")).to.equal("Unknown");
+    });
+
+    it("Throws RangeError when findLeaguePda is passed an out-of-bounds or negative leagueId", () => {
+      expect(() => findLeaguePda(admin.publicKey, -1)).to.throw(RangeError);
+      expect(() =>
+        findLeaguePda(admin.publicKey, new anchor.BN("18446744073709551616")),
+      ).to.throw(RangeError);
+    });
   });
 
   describe("SOL League Lifecycle", () => {
@@ -202,6 +242,10 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
         .signers([oracle])
         .rpc();
 
@@ -425,7 +469,7 @@ describe("league-escrow", () => {
     });
   });
 
-  describe("SPL/USDC League Lifecycle", () => {
+  describe("SPL/USDC League Full Lifecycle", () => {
     const leagueId = new anchor.BN(202);
     const entryFee = new anchor.BN(50000000); // 50 USDC
     const maxPlayers = 2;
@@ -433,6 +477,7 @@ describe("league-escrow", () => {
     let leaguePda: PublicKey;
     let vaultPda: PublicKey;
     let entry1Pda: PublicKey;
+    let entry2Pda: PublicKey;
 
     before(() => {
       [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
@@ -440,6 +485,11 @@ describe("league-escrow", () => {
       [entry1Pda] = findEntryPda(
         leaguePda,
         player1.publicKey,
+        program.programId,
+      );
+      [entry2Pda] = findEntryPda(
+        leaguePda,
+        player2.publicKey,
         program.programId,
       );
     });
@@ -463,7 +513,7 @@ describe("league-escrow", () => {
       expect(account.paymentMint.toBase58()).to.equal(mint.toBase58());
     });
 
-    it("Joins the SPL league", async () => {
+    it("Joins the SPL league for player 1 and player 2", async () => {
       await (program.methods as any)
         .joinLeagueSpl()
         .accounts({
@@ -479,8 +529,184 @@ describe("league-escrow", () => {
         .signers([player1])
         .rpc();
 
+      await (program.methods as any)
+        .joinLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          entry: entry2Pda,
+          vault: vaultPda,
+          paymentMint: mint,
+          playerToken: player2TokenAccount,
+          player: player2.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player2])
+        .rpc();
+
       const vaultAccount = await getAccount(provider.connection, vaultPda);
-      expect(Number(vaultAccount.amount)).to.equal(50000000);
+      expect(Number(vaultAccount.amount)).to.equal(100000000);
+    });
+
+    it("Locks, resolves, claims payout and closes SPL league", async () => {
+      await (program.methods as any)
+        .lockLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      const winners = [
+        { winner: player1.publicKey, payout: new anchor.BN(80000000) },
+        { winner: player2.publicKey, payout: new anchor.BN(10000000) },
+      ];
+
+      await (program.methods as any)
+        .resolveLeague(winners)
+        .accounts({
+          league: leaguePda,
+          authority: oracle.publicKey,
+        })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
+        .signers([oracle])
+        .rpc();
+
+      await (program.methods as any)
+        .claimPayoutSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          winnerToken: player1TokenAccount,
+          winner: player1.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .claimPayoutSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          winnerToken: player2TokenAccount,
+          winner: player2.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player2])
+        .rpc();
+
+      await (program.methods as any)
+        .closeLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          adminToken: adminTokenAccount,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
+    });
+  });
+
+  describe("SPL League Cancel & Refund Path", () => {
+    const leagueId = new anchor.BN(505);
+    const entryFee = new anchor.BN(25000000);
+    const maxPlayers = 2;
+
+    let leaguePda: PublicKey;
+    let vaultPda: PublicKey;
+    let entry1Pda: PublicKey;
+
+    before(() => {
+      [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
+      [vaultPda] = findVaultPda(leaguePda, program.programId);
+      [entry1Pda] = findEntryPda(
+        leaguePda,
+        player1.publicKey,
+        program.programId,
+      );
+    });
+
+    it("Creates SPL league, joins, cancels and refunds", async () => {
+      await (program.methods as any)
+        .createLeagueSpl(leagueId, entryFee, maxPlayers)
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          admin: admin.publicKey,
+          oracle: oracle.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .joinLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          vault: vaultPda,
+          paymentMint: mint,
+          playerToken: player1TokenAccount,
+          player: player1.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .cancelLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .refundSpl()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          vault: vaultPda,
+          paymentMint: mint,
+          playerToken: player1TokenAccount,
+          player: player1.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .closeLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          adminToken: adminTokenAccount,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
     });
   });
 });
