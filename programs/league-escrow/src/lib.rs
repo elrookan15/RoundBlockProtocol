@@ -151,19 +151,30 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        acc.owner == ctx.program_id
+                            && acc.data_len() >= PlayerEntry::LEN
+                            && acc.data.borrow()[8..40] == league_key.to_bytes()
+                            && acc.data.borrow()[40..72] == input.winner.to_bytes()
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
-                require!(
-                    entry_acc.owner == ctx.program_id,
-                    ErrorCode::InvalidWinnerEntry
-                );
+
+                let bump = entry_acc.data.borrow()[72];
+                let expected_pda = Pubkey::create_program_address(
+                    &[
+                        b"entry",
+                        league_key.as_ref(),
+                        input.winner.as_ref(),
+                        &[bump],
+                    ],
+                    ctx.program_id,
+                )
+                .map_err(|_| ErrorCode::InvalidWinnerEntry)?;
+
+                require!(entry_acc.key() == expected_pda, ErrorCode::InvalidWinnerEntry);
             }
 
             winners.push(WinnerSplit {
@@ -393,6 +404,20 @@ pub mod league_escrow {
             &[bump],
         ];
         let signer_seeds = &[&seeds[..]];
+
+        let vault_amount = ctx.accounts.vault.amount;
+        if vault_amount > 0 {
+            if let Some(admin_token) = &ctx.accounts.admin_token {
+                let transfer_cpi = Transfer {
+                    from: ctx.accounts.vault.to_account_info(),
+                    to: admin_token.to_account_info(),
+                    authority: league.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.token_program.to_account_info();
+                let cpi_ctx = CpiContext::new_with_signer(cpi_program, transfer_cpi, signer_seeds);
+                token::transfer(cpi_ctx, vault_amount)?;
+            }
+        }
 
         let cpi_accounts = token::CloseAccount {
             account: ctx.accounts.vault.to_account_info(),
@@ -672,6 +697,11 @@ pub struct CloseLeagueSpl<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
     pub payment_mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        token::mint = payment_mint,
+    )]
+    pub admin_token: Option<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub admin: Signer<'info>,
     pub token_program: Program<'info, Token>,
