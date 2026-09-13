@@ -144,6 +144,7 @@ pub mod league_escrow {
         let mut winners = Vec::with_capacity(winner_inputs.len());
 
         for input in &winner_inputs {
+            require!(input.payout > 0, ErrorCode::InvalidWinners);
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
             require!(
                 !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
