@@ -444,6 +444,32 @@ describe("league-escrow", () => {
       );
     });
 
+    it("Fails to resolve league with zero payout", async () => {
+      const zeroWinners = [
+        { winner: player1.publicKey, payout: new anchor.BN(0) },
+      ];
+
+      try {
+        await (program.methods as any)
+          .resolveLeague(zeroWinners)
+          .accounts({
+            league: leaguePda,
+            authority: oracle.publicKey,
+          })
+          .signers([oracle])
+          .rpc();
+        expect.fail("Should have failed with InvalidWinners for zero payout");
+      } catch (err: any) {
+        expect(err.toString()).to.include("InvalidWinners");
+      }
+    });
+
+    it("Fails to findLeaguePda with negative league ID", () => {
+      expect(() =>
+        findLeaguePda(admin.publicKey, -1, program.programId),
+      ).to.throw("League ID must be non-negative");
+    });
+
     it("Creates an SPL league", async () => {
       await (program.methods as any)
         .createLeagueSpl(leagueId, entryFee, maxPlayers)
