@@ -196,6 +196,7 @@ pub mod league_escrow {
         require!(!winner_split.claimed, ErrorCode::AlreadyClaimed);
         let payout = winner_split.payout;
         winner_split.claimed = true;
+        league.total_pot = league.total_pot.checked_sub(payout).ok_or(ErrorCode::Overflow)?;
 
         if payout > 0 {
             let league_info = league.to_account_info();
@@ -237,6 +238,7 @@ pub mod league_escrow {
         require!(!winner_split.claimed, ErrorCode::AlreadyClaimed);
         let payout = winner_split.payout;
         winner_split.claimed = true;
+        league.total_pot = league.total_pot.checked_sub(payout).ok_or(ErrorCode::Overflow)?;
 
         if payout > 0 {
             let admin_key = league.admin;
@@ -343,6 +345,7 @@ pub mod league_escrow {
     pub fn close_league(ctx: Context<CloseLeague>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        require!(league.payment_mint.is_none(), ErrorCode::WrongCurrency);
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -366,6 +369,11 @@ pub mod league_escrow {
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(
+            payment_mint == ctx.accounts.payment_mint.key(),
+            ErrorCode::WrongCurrency
+        );
 
         match league.status {
             LeagueStatus::Resolved => {
