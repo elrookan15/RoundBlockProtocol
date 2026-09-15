@@ -150,21 +150,20 @@ pub mod league_escrow {
                 ErrorCode::InvalidWinners
             );
 
-            if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
-                    .remaining_accounts
-                    .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
-                    .ok_or(ErrorCode::InvalidWinnerEntry)?;
-                require!(
-                    entry_acc.owner == ctx.program_id,
-                    ErrorCode::InvalidWinnerEntry
-                );
-            }
+            let (expected_entry_pda, _) = Pubkey::find_program_address(
+                &[b"entry", league_key.as_ref(), input.winner.as_ref()],
+                ctx.program_id,
+            );
+
+            let entry_acc = ctx
+                .remaining_accounts
+                .iter()
+                .find(|acc| acc.key() == expected_entry_pda)
+                .ok_or(ErrorCode::InvalidWinnerEntry)?;
+            require!(
+                entry_acc.owner == ctx.program_id,
+                ErrorCode::InvalidWinnerEntry
+            );
 
             winners.push(WinnerSplit {
                 winner: input.winner,
