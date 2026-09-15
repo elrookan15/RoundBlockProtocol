@@ -37,6 +37,24 @@ export function findLeaguePda(
 }
 
 /**
+ * Derives expected PlayerEntry PDAs for a set of winners to pass as remainingAccounts to resolveLeague.
+ */
+export function validateWinnerEntries(
+  leaguePda: PublicKey,
+  winnerPubkeys: PublicKey[],
+  programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
+): { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[] {
+  return winnerPubkeys.map((winner) => {
+    const [entryPda] = findEntryPda(leaguePda, winner, programId);
+    return {
+      pubkey: entryPda,
+      isWritable: false,
+      isSigner: false,
+    };
+  });
+}
+
+/**
  * Finds the Program Derived Address (PDA) for a Player Entry account.
  */
 export function findEntryPda(

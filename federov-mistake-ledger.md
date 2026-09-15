@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: `resolve_league` instruction validating `PlayerEntry` PDAs only when `remaining_accounts` is non-empty
+bad_assumption: Assumed oracle/admin callers would always pass `remaining_accounts`, or that omitting `remaining_accounts` was an intentional opt-out
+what_actually_happened: Omitting `remaining_accounts` allowed resolving winner splits for addresses that never joined the league or created `PlayerEntry` PDAs, bypassing entry verification
+corrective_rule: Always enforce mandatory `PlayerEntry` PDA verification for every winner input in `resolve_league`, regardless of `remaining_accounts` slice length
+regression_test: `programs/league-escrow/src/lib.rs` `resolve_league` PDA derivation guard
+confidence_adjustment: Flag optional validation branches contingent on client slice length as High security risk
+source: audit sweep
