@@ -30,6 +30,9 @@ export function findLeaguePda(
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
   const bn = BN.isBN(leagueId) ? leagueId : new BN(leagueId.toString());
+  if (bn.isNeg() || bn.bitLength() > 64) {
+    throw new Error("leagueId must be an unsigned 64-bit integer");
+  }
   return PublicKey.findProgramAddressSync(
     [Buffer.from("league"), admin.toBuffer(), bn.toArrayLike(Buffer, "le", 8)],
     programId,
