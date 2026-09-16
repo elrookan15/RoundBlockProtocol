@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: Searching `remaining_accounts` in Rust/Anchor with `.find().and_then()` when filtering multi-account slices
+bad_assumption: Assumed `.find()` with owner/length filter alone isolates the exact item before evaluating `.and_then()`
+what_actually_happened: `.find()` selected the first matching account in `remaining_accounts` for all loop iterations, causing `.and_then()` equality check to fail on subsequent items
+corrective_rule: Place the target key or derived PDA comparison directly inside the `.find(...)` predicate closure or use `.find_map()`
+regression_test: `tests/league-escrow.ts` remaining accounts multi-winner resolution test
+confidence_adjustment: Ensure slice iterator predicate checks match the full key target, not just general metadata properties
+source: code review

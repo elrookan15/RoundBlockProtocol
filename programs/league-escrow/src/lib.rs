@@ -151,14 +151,25 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id || acc.data_len() < PlayerEntry::LEN {
+                            return false;
+                        }
+                        let data = acc.data.borrow();
+                        let Some(&bump) = data.get(PlayerEntry::BUMP_OFFSET) else {
+                            return false;
+                        };
+                        let Ok(derived_pda) = Pubkey::create_program_address(
+                            &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[bump]],
+                            ctx.program_id,
+                        ) else {
+                            return false;
+                        };
+                        derived_pda == *acc.key
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
                 require!(
                     entry_acc.owner == ctx.program_id,
@@ -343,6 +354,7 @@ pub mod league_escrow {
     pub fn close_league(ctx: Context<CloseLeague>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        require!(league.payment_mint.is_none(), ErrorCode::WrongCurrency);
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -366,6 +378,12 @@ pub mod league_escrow {
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(
+            payment_mint == ctx.accounts.payment_mint.key(),
+            ErrorCode::WrongCurrency
+        );
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -719,7 +737,8 @@ pub struct PlayerEntry {
 }
 
 impl PlayerEntry {
-    pub const LEN: usize = 8 + 32 + 32 + 1;
+    pub const BUMP_OFFSET: usize = 8 + 32 + 32;
+    pub const LEN: usize = Self::BUMP_OFFSET + 1;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
