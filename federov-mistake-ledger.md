@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: Anchor `emit!` event calls inside methods borrowing `ctx.accounts` mutably
+bad_assumption: Assumed `ctx.accounts.<account>.key()` can be called inside `emit!` while `<account>` is mutably borrowed via `let account = &mut ctx.accounts.<account>`
+what_actually_happened: Rust borrow checker threw E0502 (cannot borrow `ctx.accounts.<account>` as immutable because it is also borrowed as mutable)
+corrective_rule: Always extract immutable values (such as `.key()` or primitive field values) into local variables before emitting Anchor events on mutably borrowed accounts
+regression_test: `cargo check --manifest-path programs/league-escrow/Cargo.toml`
+confidence_adjustment: High confidence once local key extraction rule is applied before event macro invocation
+source: audit sweep

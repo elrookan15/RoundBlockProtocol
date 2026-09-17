@@ -3,6 +3,8 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
 declare_id!("YG5dVJydevZcHJQtLNirYUseJtYQQoK83uPMznXVUbW");
 
+pub const MAX_LEAGUE_PLAYERS: u8 = 200;
+
 #[program]
 pub mod league_escrow {
     use super::*;
@@ -13,7 +15,10 @@ pub mod league_escrow {
         entry_fee: u64,
         max_players: u8,
     ) -> Result<()> {
-        require!(max_players > 0, ErrorCode::InvalidMaxPlayers);
+        require!(
+            max_players > 0 && max_players <= MAX_LEAGUE_PLAYERS,
+            ErrorCode::InvalidMaxPlayers
+        );
 
         let league = &mut ctx.accounts.league;
         league.admin = ctx.accounts.admin.key();
@@ -28,6 +33,18 @@ pub mod league_escrow {
         league.winners = Vec::with_capacity(max_players as usize);
         league.bump = ctx.bumps.league;
         league.vault_bump = 0;
+
+        let league_key = league.key();
+        emit!(LeagueCreatedEvent {
+            league: league_key,
+            admin: ctx.accounts.admin.key(),
+            oracle: ctx.accounts.oracle.key(),
+            league_id,
+            entry_fee,
+            max_players,
+            payment_mint: None,
+        });
+
         Ok(())
     }
 
@@ -37,7 +54,10 @@ pub mod league_escrow {
         entry_fee: u64,
         max_players: u8,
     ) -> Result<()> {
-        require!(max_players > 0, ErrorCode::InvalidMaxPlayers);
+        require!(
+            max_players > 0 && max_players <= MAX_LEAGUE_PLAYERS,
+            ErrorCode::InvalidMaxPlayers
+        );
 
         let league = &mut ctx.accounts.league;
         league.admin = ctx.accounts.admin.key();
@@ -52,6 +72,18 @@ pub mod league_escrow {
         league.winners = Vec::with_capacity(max_players as usize);
         league.bump = ctx.bumps.league;
         league.vault_bump = ctx.bumps.vault;
+
+        let league_key = league.key();
+        emit!(LeagueCreatedEvent {
+            league: league_key,
+            admin: ctx.accounts.admin.key(),
+            oracle: ctx.accounts.oracle.key(),
+            league_id,
+            entry_fee,
+            max_players,
+            payment_mint: Some(ctx.accounts.payment_mint.key()),
+        });
+
         Ok(())
     }
 
@@ -80,6 +112,17 @@ pub mod league_escrow {
 
         league.player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
+
+        let league_key = league.key();
+        let player_count = league.player_count;
+        let total_pot = league.total_pot;
+
+        emit!(PlayerJoinedEvent {
+            league: league_key,
+            player: ctx.accounts.player.key(),
+            player_count,
+            total_pot,
+        });
 
         Ok(())
     }
@@ -111,6 +154,17 @@ pub mod league_escrow {
         league.player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
 
+        let league_key = league.key();
+        let player_count = league.player_count;
+        let total_pot = league.total_pot;
+
+        emit!(PlayerJoinedEvent {
+            league: league_key,
+            player: ctx.accounts.player.key(),
+            player_count,
+            total_pot,
+        });
+
         Ok(())
     }
 
@@ -118,6 +172,13 @@ pub mod league_escrow {
         let league = &mut ctx.accounts.league;
         require!(league.status == LeagueStatus::Open, ErrorCode::LeagueNotOpen);
         league.status = LeagueStatus::Locked;
+
+        let league_key = league.key();
+        emit!(LeagueLockedEvent {
+            league: league_key,
+            admin: ctx.accounts.admin.key(),
+        });
+
         Ok(())
     }
 
@@ -178,6 +239,14 @@ pub mod league_escrow {
 
         league.winners = winners;
         league.status = LeagueStatus::Resolved;
+
+        emit!(LeagueResolvedEvent {
+            league: league_key,
+            authority: signer,
+            winner_count: league.winners.len() as u8,
+            total_payout,
+        });
+
         Ok(())
     }
 
@@ -217,6 +286,13 @@ pub mod league_escrow {
                 .checked_add(payout)
                 .ok_or(ErrorCode::Overflow)?;
         }
+
+        let league_key = league.key();
+        emit!(PayoutClaimedEvent {
+            league: league_key,
+            winner: winner_pubkey,
+            payout,
+        });
 
         Ok(())
     }
@@ -260,6 +336,13 @@ pub mod league_escrow {
             token::transfer(cpi_ctx, payout)?;
         }
 
+        let league_key = league.key();
+        emit!(PayoutClaimedEvent {
+            league: league_key,
+            winner: winner_pubkey,
+            payout,
+        });
+
         Ok(())
     }
 
@@ -267,6 +350,13 @@ pub mod league_escrow {
         let league = &mut ctx.accounts.league;
         require!(league.status == LeagueStatus::Open, ErrorCode::LeagueNotOpen);
         league.status = LeagueStatus::Cancelled;
+
+        let league_key = league.key();
+        emit!(LeagueCancelledEvent {
+            league: league_key,
+            admin: ctx.accounts.admin.key(),
+        });
+
         Ok(())
     }
 
@@ -300,6 +390,13 @@ pub mod league_escrow {
 
         league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+
+        let league_key = league.key();
+        emit!(PlayerRefundedEvent {
+            league: league_key,
+            player: ctx.accounts.player.key(),
+            refund_amount: entry_fee,
+        });
 
         Ok(())
     }
@@ -337,6 +434,13 @@ pub mod league_escrow {
         league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
 
+        let league_key = league.key();
+        emit!(PlayerRefundedEvent {
+            league: league_key,
+            player: ctx.accounts.player.key(),
+            refund_amount: entry_fee,
+        });
+
         Ok(())
     }
 
@@ -359,6 +463,12 @@ pub mod league_escrow {
             }
             _ => return err!(ErrorCode::InvalidLeagueStatus),
         }
+
+        let league_key = league.key();
+        emit!(LeagueClosedEvent {
+            league: league_key,
+            admin: ctx.accounts.admin.key(),
+        });
 
         Ok(())
     }
@@ -402,6 +512,12 @@ pub mod league_escrow {
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
         token::close_account(cpi_ctx)?;
+
+        let league_key = league.key();
+        emit!(LeagueClosedEvent {
+            league: league_key,
+            admin: ctx.accounts.admin.key(),
+        });
 
         Ok(())
     }
@@ -743,6 +859,65 @@ pub struct WinnerInput {
     pub payout: u64,
 }
 
+#[event]
+pub struct LeagueCreatedEvent {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+    pub oracle: Pubkey,
+    pub league_id: u64,
+    pub entry_fee: u64,
+    pub max_players: u8,
+    pub payment_mint: Option<Pubkey>,
+}
+
+#[event]
+pub struct PlayerJoinedEvent {
+    pub league: Pubkey,
+    pub player: Pubkey,
+    pub player_count: u8,
+    pub total_pot: u64,
+}
+
+#[event]
+pub struct LeagueLockedEvent {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+}
+
+#[event]
+pub struct LeagueResolvedEvent {
+    pub league: Pubkey,
+    pub authority: Pubkey,
+    pub winner_count: u8,
+    pub total_payout: u64,
+}
+
+#[event]
+pub struct PayoutClaimedEvent {
+    pub league: Pubkey,
+    pub winner: Pubkey,
+    pub payout: u64,
+}
+
+#[event]
+pub struct LeagueCancelledEvent {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+}
+
+#[event]
+pub struct PlayerRefundedEvent {
+    pub league: Pubkey,
+    pub player: Pubkey,
+    pub refund_amount: u64,
+}
+
+#[event]
+pub struct LeagueClosedEvent {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+}
+
 #[error_code]
 pub enum ErrorCode {
     #[msg("League is not in Open status.")]
@@ -769,7 +944,7 @@ pub enum ErrorCode {
     ExceedsTotalPot,
     #[msg("Arithmetic overflow.")]
     Overflow,
-    #[msg("Max players must be greater than zero.")]
+    #[msg("Max players must be greater than zero and at most 200.")]
     InvalidMaxPlayers,
     #[msg("Insufficient funds in escrow vault/account.")]
     InsufficientFunds,
