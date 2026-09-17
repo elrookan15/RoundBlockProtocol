@@ -22,6 +22,22 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
 };
 
 /**
+ * Event names emitted by the Anchor program.
+ */
+export const LEAGUE_ESCROW_EVENTS = {
+  LeagueCreated: "LeagueCreatedEvent",
+  PlayerJoined: "PlayerJoinedEvent",
+  LeagueLocked: "LeagueLockedEvent",
+  LeagueResolved: "LeagueResolvedEvent",
+  PayoutClaimed: "PayoutClaimedEvent",
+  LeagueCancelled: "LeagueCancelledEvent",
+  PlayerRefunded: "PlayerRefundedEvent",
+  LeagueClosed: "LeagueClosedEvent",
+} as const;
+
+export type LeagueEscrowEventName = keyof typeof LEAGUE_ESCROW_EVENTS;
+
+/**
  * Finds the Program Derived Address (PDA) for a League account.
  */
 export function findLeaguePda(

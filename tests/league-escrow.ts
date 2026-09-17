@@ -15,7 +15,12 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  LEAGUE_ESCROW_EVENTS,
+} from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -82,6 +87,25 @@ describe("league-escrow", () => {
     );
   });
 
+  describe("Event Constants Verification", () => {
+    it("Exports expected event constants", () => {
+      expect(LEAGUE_ESCROW_EVENTS.LeagueCreated).to.equal("LeagueCreatedEvent");
+      expect(LEAGUE_ESCROW_EVENTS.PlayerJoined).to.equal("PlayerJoinedEvent");
+      expect(LEAGUE_ESCROW_EVENTS.LeagueLocked).to.equal("LeagueLockedEvent");
+      expect(LEAGUE_ESCROW_EVENTS.LeagueResolved).to.equal(
+        "LeagueResolvedEvent",
+      );
+      expect(LEAGUE_ESCROW_EVENTS.PayoutClaimed).to.equal("PayoutClaimedEvent");
+      expect(LEAGUE_ESCROW_EVENTS.LeagueCancelled).to.equal(
+        "LeagueCancelledEvent",
+      );
+      expect(LEAGUE_ESCROW_EVENTS.PlayerRefunded).to.equal(
+        "PlayerRefundedEvent",
+      );
+      expect(LEAGUE_ESCROW_EVENTS.LeagueClosed).to.equal("LeagueClosedEvent");
+    });
+  });
+
   describe("SOL League Lifecycle", () => {
     const leagueId = new anchor.BN(101);
     const entryFee = new anchor.BN(100000000); // 0.1 SOL
@@ -105,7 +129,7 @@ describe("league-escrow", () => {
       );
     });
 
-    it("Fails to create a league with max_players = 0", async () => {
+    it("Fails to create a league with max_players = 0 or max_players > 200", async () => {
       const zeroId = new anchor.BN(999);
       const [zeroPda] = findLeaguePda(
         admin.publicKey,
@@ -118,6 +142,28 @@ describe("league-escrow", () => {
           .createLeague(zeroId, entryFee, 0)
           .accounts({
             league: zeroPda,
+            admin: admin.publicKey,
+            oracle: oracle.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        expect.fail("Should have failed with InvalidMaxPlayers");
+      } catch (err: any) {
+        expect(err.toString()).to.include("InvalidMaxPlayers");
+      }
+
+      const overId = new anchor.BN(998);
+      const [overPda] = findLeaguePda(
+        admin.publicKey,
+        overId,
+        program.programId,
+      );
+
+      try {
+        await (program.methods as any)
+          .createLeague(overId, entryFee, 201)
+          .accounts({
+            league: overPda,
             admin: admin.publicKey,
             oracle: oracle.publicKey,
             systemProgram: SystemProgram.programId,
@@ -190,7 +236,7 @@ describe("league-escrow", () => {
       expect(account.status).to.deep.equal({ locked: {} });
     });
 
-    it("Resolves the SOL league", async () => {
+    it("Resolves the SOL league with entry PDA validation via remaining accounts", async () => {
       const winners = [
         { winner: player1.publicKey, payout: new anchor.BN(150000000) },
         { winner: player2.publicKey, payout: new anchor.BN(50000000) },
@@ -202,6 +248,10 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
         .signers([oracle])
         .rpc();
 
