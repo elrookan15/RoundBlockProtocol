@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: On-chain winner account validation in Anchor using `find_program_address` inside iterative loops over remaining accounts
+bad_assumption: Assumed `find_program_address` in loops is low-cost and necessary for verifying PDAs when validating remaining accounts
+what_actually_happened: `find_program_address` repeatedly iterates bump searches on SBF compute budget, consuming thousands of CUs per winner
+corrective_rule: Deserialize account data to read stored `bump` and derive PDA with `create_program_address`, reducing compute cost to O(1) sha256 execution
+regression_test: `tests/league-escrow.ts` integration test case for `resolveLeague` with `remainingAccounts`
+confidence_adjustment: Treat iterative PDA resolution calls in hot execution loops as High risk for CU exhaustion
+source: audit sweep
