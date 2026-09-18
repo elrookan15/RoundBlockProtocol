@@ -21,6 +21,11 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
   programId: LEAGUE_ESCROW_PROGRAM_ID,
 };
 
+// Cached seed prefix buffers to avoid repeated heap allocations and GC pressure during PDA derivations
+const LEAGUE_SEED_BYTES = Buffer.from("league");
+const ENTRY_SEED_BYTES = Buffer.from("entry");
+const VAULT_SEED_BYTES = Buffer.from("vault");
+
 /**
  * Finds the Program Derived Address (PDA) for a League account.
  */
@@ -31,7 +36,7 @@ export function findLeaguePda(
 ): [PublicKey, number] {
   const bn = BN.isBN(leagueId) ? leagueId : new BN(leagueId.toString());
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("league"), admin.toBuffer(), bn.toArrayLike(Buffer, "le", 8)],
+    [LEAGUE_SEED_BYTES, admin.toBuffer(), bn.toArrayLike(Buffer, "le", 8)],
     programId,
   );
 }
@@ -45,7 +50,7 @@ export function findEntryPda(
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("entry"), leaguePda.toBuffer(), player.toBuffer()],
+    [ENTRY_SEED_BYTES, leaguePda.toBuffer(), player.toBuffer()],
     programId,
   );
 }
@@ -58,7 +63,7 @@ export function findVaultPda(
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), leaguePda.toBuffer()],
+    [VAULT_SEED_BYTES, leaguePda.toBuffer()],
     programId,
   );
 }

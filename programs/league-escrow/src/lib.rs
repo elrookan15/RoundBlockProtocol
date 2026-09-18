@@ -151,17 +151,36 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id || acc.data_len() < PlayerEntry::LEN {
+                            return false;
+                        }
+                        if let Ok(entry) = PlayerEntry::try_from_slice(&acc.data.borrow()) {
+                            entry.league == league_key && entry.player == input.winner
+                        } else {
+                            false
+                        }
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
+
+                let entry_data = PlayerEntry::try_from_slice(&entry_acc.data.borrow())
+                    .map_err(|_| ErrorCode::InvalidWinnerEntry)?;
+                let expected_pda = Pubkey::create_program_address(
+                    &[
+                        b"entry",
+                        league_key.as_ref(),
+                        input.winner.as_ref(),
+                        &[entry_data.bump],
+                    ],
+                    ctx.program_id,
+                )
+                .map_err(|_| ErrorCode::InvalidWinnerEntry)?;
+
                 require!(
-                    entry_acc.owner == ctx.program_id,
+                    entry_acc.key() == expected_pda,
                     ErrorCode::InvalidWinnerEntry
                 );
             }
@@ -239,15 +258,8 @@ pub mod league_escrow {
         winner_split.claimed = true;
 
         if payout > 0 {
-            let admin_key = league.admin;
             let league_id_bytes = league.league_id.to_le_bytes();
-            let bump = league.bump;
-            let seeds = &[
-                b"league",
-                admin_key.as_ref(),
-                league_id_bytes.as_ref(),
-                &[bump],
-            ];
+            let seeds = league.seeds(&league_id_bytes);
             let signer_seeds = &[&seeds[..]];
 
             let cpi_accounts = Transfer {
@@ -313,15 +325,8 @@ pub mod league_escrow {
         let entry_fee = league.entry_fee;
 
         if entry_fee > 0 {
-            let admin_key = league.admin;
             let league_id_bytes = league.league_id.to_le_bytes();
-            let bump = league.bump;
-            let seeds = &[
-                b"league",
-                admin_key.as_ref(),
-                league_id_bytes.as_ref(),
-                &[bump],
-            ];
+            let seeds = league.seeds(&league_id_bytes);
             let signer_seeds = &[&seeds[..]];
 
             let cpi_accounts = Transfer {
@@ -383,15 +388,8 @@ pub mod league_escrow {
             _ => return err!(ErrorCode::InvalidLeagueStatus),
         }
 
-        let admin_key = league.admin;
         let league_id_bytes = league.league_id.to_le_bytes();
-        let bump = league.bump;
-        let seeds = &[
-            b"league",
-            admin_key.as_ref(),
-            league_id_bytes.as_ref(),
-            &[bump],
-        ];
+        let seeds = league.seeds(&league_id_bytes);
         let signer_seeds = &[&seeds[..]];
 
         let cpi_accounts = token::CloseAccount {
@@ -708,6 +706,15 @@ impl League {
         + 4 + (max_players as usize) * (32 + 8 + 1) // winners
         + 1  // bump
         + 1  // vault_bump
+    }
+
+    pub fn seeds<'a>(&'a self, league_id_bytes: &'a [u8; 8]) -> [&'a [u8]; 4] {
+        [
+            b"league",
+            self.admin.as_ref(),
+            league_id_bytes.as_ref(),
+            std::slice::from_ref(&self.bump),
+        ]
     }
 }
 
