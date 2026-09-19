@@ -9,6 +9,24 @@ export const LEAGUE_ESCROW_PROGRAM_ID = new PublicKey(
   "YG5dVJydevZcHJQtLNirYUseJtYQQoK83uPMznXVUbW",
 );
 
+export enum LeagueStatus {
+  Open = "Open",
+  Locked = "Locked",
+  Resolved = "Resolved",
+  Cancelled = "Cancelled",
+}
+
+export interface WinnerSplit {
+  winner: PublicKey;
+  payout: BN;
+  claimed: boolean;
+}
+
+export interface WinnerInput {
+  winner: PublicKey;
+  payout: BN;
+}
+
 export interface RoundBlockConfig {
   network: string;
   rpcUrl: string;
@@ -20,6 +38,63 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
   rpcUrl: "https://api.devnet.solana.com",
   programId: LEAGUE_ESCROW_PROGRAM_ID,
 };
+
+/**
+ * Protocol Event Interfaces
+ */
+export interface LeagueCreatedEvent {
+  league: PublicKey;
+  admin: PublicKey;
+  oracle: PublicKey;
+  leagueId: BN;
+  entryFee: BN;
+  maxPlayers: number;
+  paymentMint: PublicKey | null;
+}
+
+export interface PlayerJoinedEvent {
+  league: PublicKey;
+  player: PublicKey;
+  entry: PublicKey;
+  entryFee: BN;
+  paymentMint: PublicKey | null;
+}
+
+export interface LeagueLockedEvent {
+  league: PublicKey;
+  admin: PublicKey;
+}
+
+export interface LeagueResolvedEvent {
+  league: PublicKey;
+  authority: PublicKey;
+  winnersCount: number;
+  totalPayout: BN;
+}
+
+export interface PayoutClaimedEvent {
+  league: PublicKey;
+  winner: PublicKey;
+  payout: BN;
+  paymentMint: PublicKey | null;
+}
+
+export interface LeagueCancelledEvent {
+  league: PublicKey;
+  admin: PublicKey;
+}
+
+export interface PlayerRefundedEvent {
+  league: PublicKey;
+  player: PublicKey;
+  entryFee: BN;
+  paymentMint: PublicKey | null;
+}
+
+export interface LeagueClosedEvent {
+  league: PublicKey;
+  admin: PublicKey;
+}
 
 /**
  * Finds the Program Derived Address (PDA) for a League account.

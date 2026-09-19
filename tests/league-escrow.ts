@@ -483,4 +483,104 @@ describe("league-escrow", () => {
       expect(Number(vaultAccount.amount)).to.equal(50000000);
     });
   });
+
+  describe("Cancel and Refund Path for SPL Leagues", () => {
+    const leagueId = new anchor.BN(505);
+    const entryFee = new anchor.BN(25000000); // 25 USDC
+    const maxPlayers = 2;
+
+    let leaguePda: PublicKey;
+    let vaultPda: PublicKey;
+    let entry1Pda: PublicKey;
+
+    before(() => {
+      [leaguePda] = findLeaguePda(admin.publicKey, leagueId, program.programId);
+      [vaultPda] = findVaultPda(leaguePda, program.programId);
+      [entry1Pda] = findEntryPda(
+        leaguePda,
+        player1.publicKey,
+        program.programId,
+      );
+    });
+
+    it("Creates SPL league and player joins", async () => {
+      await (program.methods as any)
+        .createLeagueSpl(leagueId, entryFee, maxPlayers)
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          admin: admin.publicKey,
+          oracle: oracle.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .joinLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          vault: vaultPda,
+          paymentMint: mint,
+          playerToken: player1TokenAccount,
+          player: player1.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      const account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.playerCount).to.equal(1);
+    });
+
+    it("Cancels SPL league and refunds player deposit", async () => {
+      await (program.methods as any)
+        .cancelLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .refundSpl()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          vault: vaultPda,
+          paymentMint: mint,
+          playerToken: player1TokenAccount,
+          player: player1.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      const account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.playerCount).to.equal(0);
+      expect(account.totalPot.toNumber()).to.equal(0);
+    });
+
+    it("Closes SPL league and closes vault account", async () => {
+      await (program.methods as any)
+        .closeLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
+    });
+  });
 });
