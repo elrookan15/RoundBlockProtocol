@@ -143,7 +143,7 @@ pub mod league_escrow {
         let mut total_payout: u64 = 0;
         let mut winners = Vec::with_capacity(winner_inputs.len());
 
-        for input in &winner_inputs {
+        for (i, input) in winner_inputs.iter().enumerate() {
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
             require!(
                 !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
@@ -151,15 +151,43 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
-                    .remaining_accounts
-                    .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
-                    .ok_or(ErrorCode::InvalidWinnerEntry)?;
+                let entry_acc = if let Some(candidate) = ctx.remaining_accounts.get(i) {
+                    if candidate.owner == ctx.program_id && candidate.data_len() == PlayerEntry::LEN {
+                        let data = candidate.try_borrow_data()?;
+                        let bump = data[72];
+                        if let Ok(derived_pda) = Pubkey::create_program_address(
+                            &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[bump]],
+                            ctx.program_id,
+                        ) {
+                            if derived_pda == candidate.key() {
+                                Some(candidate)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let entry_acc = match entry_acc {
+                    Some(acc) => acc,
+                    None => {
+                        let (expected_entry_pda, _) = Pubkey::find_program_address(
+                            &[b"entry", league_key.as_ref(), input.winner.as_ref()],
+                            ctx.program_id,
+                        );
+                        ctx.remaining_accounts
+                            .iter()
+                            .find(|acc| acc.key() == expected_entry_pda)
+                            .ok_or(ErrorCode::InvalidWinnerEntry)?
+                    }
+                };
+
                 require!(
                     entry_acc.owner == ctx.program_id,
                     ErrorCode::InvalidWinnerEntry
@@ -567,6 +595,7 @@ pub struct ClaimPayoutSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = winner,
     )]
     pub winner_token: Account<'info, TokenAccount>,
     #[account(mut)]
@@ -632,6 +661,7 @@ pub struct RefundSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = player,
     )]
     pub player_token: Account<'info, TokenAccount>,
     #[account(mut)]
