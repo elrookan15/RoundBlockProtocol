@@ -482,5 +482,57 @@ describe("league-escrow", () => {
       const vaultAccount = await getAccount(provider.connection, vaultPda);
       expect(Number(vaultAccount.amount)).to.equal(50000000);
     });
+
+    it("Locks, resolves, claims payout, and closes SPL league", async () => {
+      await (program.methods as any)
+        .lockLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      const winners = [
+        { winner: player1.publicKey, payout: new anchor.BN(50000000) },
+      ];
+
+      await (program.methods as any)
+        .resolveLeague(winners)
+        .accounts({
+          league: leaguePda,
+          authority: oracle.publicKey,
+        })
+        .signers([oracle])
+        .rpc();
+
+      await (program.methods as any)
+        .claimPayoutSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          winnerToken: player1TokenAccount,
+          winner: player1.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .closeLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
+    });
   });
 });

@@ -15,6 +15,18 @@ export interface RoundBlockConfig {
   programId: PublicKey;
 }
 
+export interface WinnerInput {
+  winner: PublicKey;
+  payout: BN;
+}
+
+export enum LeagueStatus {
+  Open = "Open",
+  Locked = "Locked",
+  Resolved = "Resolved",
+  Cancelled = "Cancelled",
+}
+
 export const DEFAULT_CONFIG: RoundBlockConfig = {
   network: "devnet",
   rpcUrl: "https://api.devnet.solana.com",

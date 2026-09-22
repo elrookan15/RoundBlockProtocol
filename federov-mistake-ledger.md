@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-22
+trigger_pattern: On-chain PDA validation using unconstrained `Pubkey::find_program_address` inside iteration loops in Anchor instructions
+bad_assumption: Assumed `find_program_address` CU overhead is negligible for small remaining_accounts vectors
+what_actually_happened: `find_program_address` repeatedly iterates bump seeds from 255 down, consuming significant compute units (CUs) on every iteration in loop bodies
+corrective_rule: Validate PDA account owner and exact seed address matching or pass stored bump seeds where available to minimize compute unit consumption during remaining account iteration
+regression_test: `cargo check --manifest-path programs/league-escrow/Cargo.toml`
+confidence_adjustment: Flag loop-based `find_program_address` invocations in Solana programs as High optimization targets for CU efficiency
+source: architectural optimization sweep
