@@ -158,10 +158,14 @@ pub mod league_escrow {
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        acc.key() == expected_entry_pda
+                            && acc.owner == ctx.program_id
+                            && acc.data_len() == PlayerEntry::LEN
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
                 require!(
-                    entry_acc.owner == ctx.program_id,
+                    entry_acc.owner == ctx.program_id && entry_acc.data_len() == PlayerEntry::LEN,
                     ErrorCode::InvalidWinnerEntry
                 );
             }
@@ -366,6 +370,11 @@ pub mod league_escrow {
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(
+            payment_mint == ctx.accounts.payment_mint.key(),
+            ErrorCode::WrongCurrency
+        );
 
         match league.status {
             LeagueStatus::Resolved => {
