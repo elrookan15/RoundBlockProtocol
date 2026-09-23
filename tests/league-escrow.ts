@@ -15,7 +15,16 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  findLeaguePdaBatch,
+  findEntryPdaBatch,
+  SEED_LEAGUE,
+  SEED_ENTRY,
+  SEED_VAULT,
+} from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -80,6 +89,62 @@ describe("league-escrow", () => {
       admin,
       1000000000,
     );
+  });
+
+  describe("PDA Helper & Seed Utilities", () => {
+    it("Verifies seed constants and batch PDA derivation helpers", () => {
+      expect(SEED_LEAGUE.toString("utf-8")).to.equal("league");
+      expect(SEED_ENTRY.toString("utf-8")).to.equal("entry");
+      expect(SEED_VAULT.toString("utf-8")).to.equal("vault");
+
+      const leagueIds = [new anchor.BN(101), new anchor.BN(102)];
+      const batchLeaguePdas = findLeaguePdaBatch(
+        admin.publicKey,
+        leagueIds,
+        program.programId,
+      );
+      const singleLeaguePda1 = findLeaguePda(
+        admin.publicKey,
+        leagueIds[0],
+        program.programId,
+      );
+      const singleLeaguePda2 = findLeaguePda(
+        admin.publicKey,
+        leagueIds[1],
+        program.programId,
+      );
+
+      expect(batchLeaguePdas[0][0].toBase58()).to.equal(
+        singleLeaguePda1[0].toBase58(),
+      );
+      expect(batchLeaguePdas[1][0].toBase58()).to.equal(
+        singleLeaguePda2[0].toBase58(),
+      );
+
+      const players = [player1.publicKey, player2.publicKey];
+      const batchEntryPdas = findEntryPdaBatch(
+        batchLeaguePdas[0][0],
+        players,
+        program.programId,
+      );
+      const singleEntryPda1 = findEntryPda(
+        batchLeaguePdas[0][0],
+        players[0],
+        program.programId,
+      );
+      const singleEntryPda2 = findEntryPda(
+        batchLeaguePdas[0][0],
+        players[1],
+        program.programId,
+      );
+
+      expect(batchEntryPdas[0][0].toBase58()).to.equal(
+        singleEntryPda1[0].toBase58(),
+      );
+      expect(batchEntryPdas[1][0].toBase58()).to.equal(
+        singleEntryPda2[0].toBase58(),
+      );
+    });
   });
 
   describe("SOL League Lifecycle", () => {
@@ -225,7 +290,7 @@ describe("league-escrow", () => {
       }
     });
 
-    it("Claims payout for player 1 and player 2 then closes league", async () => {
+    it("Claims payout for player 1 and player 2 with total_pot accounting integrity, then closes league", async () => {
       const preBalance1 = await provider.connection.getBalance(
         player1.publicKey,
       );
@@ -244,6 +309,9 @@ describe("league-escrow", () => {
       );
       expect(postBalance1).to.be.greaterThan(preBalance1);
 
+      let account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.totalPot.toNumber()).to.equal(50000000); // 200M - 150M = 50M
+
       await (program.methods as any)
         .claimPayout()
         .accounts({
@@ -252,6 +320,9 @@ describe("league-escrow", () => {
         })
         .signers([player2])
         .rpc();
+
+      account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.totalPot.toNumber()).to.equal(0); // 50M - 50M = 0
 
       await (program.methods as any)
         .closeLeague()
