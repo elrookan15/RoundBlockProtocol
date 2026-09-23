@@ -56,3 +56,25 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: Payout claim instructions (`claim_payout`, `claim_payout_spl`) updating winner `claimed` boolean without decrementing `league.total_pot`
+bad_assumption: Assumed updating `winner.claimed = true` was sufficient state tracking without adjusting parent state `total_pot`
+what_actually_happened: `league.total_pot` remained static after payouts were claimed, creating a drift between tracked total pot and actual on-chain account/vault token balances
+corrective_rule: Always pair payout transfers with explicit checked decrements on `league.total_pot` (`league.total_pot.checked_sub(payout)`) to maintain state accounting invariants
+regression_test: `tests/league-escrow.ts` assertion verifying `account.totalPot` decrements post-claim
+confidence_adjustment: Flag state structs tracking balance aggregators as requiring exact sync assertions across all withdrawal/claim paths
+source: audit sweep
+
+## M-007
+
+date: 2026-09-15
+trigger_pattern: Searching remaining accounts in loop using `iter().find()` with O(N * M) complexity during instruction processing
+bad_assumption: Assumed linear `find()` over `ctx.remaining_accounts` had negligible CU impact on Solana runtime
+what_actually_happened: Nested iteration over N winners and M remaining accounts burned excessive compute units and scaled quadratically
+corrective_rule: Enforce positional account indexing (`ctx.remaining_accounts[i]`) with explicit length checks (`ctx.remaining_accounts.len() == winner_inputs.len()`) for O(N) verification complexity
+regression_test: `cargo check --manifest-path programs/league-escrow/Cargo.toml` and unit tests
+confidence_adjustment: Require positional indexing for slice lookups in Anchor instruction handlers
+source: performance audit
