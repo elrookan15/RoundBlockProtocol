@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: On-chain loop performing `Pubkey::find_program_address` to verify PDA for each element in an input array
+bad_assumption: Assumed `find_program_address` inside on-chain instruction loops is sufficiently low-cost for small arrays
+what_actually_happened: `find_program_address` iteratively searches bump seeds with SHA-256 (up to 256 iterations), consuming ~2,500 CUs per call and risking transaction failure due to Compute Unit exhaustion on multi-winner resolutions
+corrective_rule: Extract the stored bump seed from the target account data when passed via `remaining_accounts` and verify the address deterministically using `Pubkey::create_program_address` (~100 CUs)
+regression_test: `tests/league-escrow.ts` test case for "Resolves the SOL league with remaining accounts PDA validation"
+confidence_adjustment: Lower default confidence on on-chain loops calling `find_program_address` until `create_program_address` with stored bumps is implemented
+source: audit sweep
