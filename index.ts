@@ -37,6 +37,35 @@ export function findLeaguePda(
 }
 
 /**
+ * Batch derives Player Entry PDAs for a list of winner public keys.
+ */
+export function findWinnerEntryPdas(
+  leaguePda: PublicKey,
+  winners: PublicKey[],
+  programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
+): Array<[PublicKey, number]> {
+  return winners.map((winner) => findEntryPda(leaguePda, winner, programId));
+}
+
+/**
+ * Constructs AccountMeta objects for remaining_accounts passed to resolve_league.
+ */
+export function findWinnerRemainingAccountMetas(
+  leaguePda: PublicKey,
+  winners: PublicKey[],
+  programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
+): Array<{ pubkey: PublicKey; isWritable: boolean; isSigner: boolean }> {
+  return winners.map((winner) => {
+    const [entryPda] = findEntryPda(leaguePda, winner, programId);
+    return {
+      pubkey: entryPda,
+      isWritable: false,
+      isSigner: false,
+    };
+  });
+}
+
+/**
  * Finds the Program Derived Address (PDA) for a Player Entry account.
  */
 export function findEntryPda(

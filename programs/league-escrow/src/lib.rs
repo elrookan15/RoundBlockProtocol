@@ -143,7 +143,7 @@ pub mod league_escrow {
         let mut total_payout: u64 = 0;
         let mut winners = Vec::with_capacity(winner_inputs.len());
 
-        for input in &winner_inputs {
+        for (i, input) in winner_inputs.iter().enumerate() {
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
             require!(
                 !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
@@ -151,17 +151,59 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
-                    .remaining_accounts
-                    .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
-                    .ok_or(ErrorCode::InvalidWinnerEntry)?;
+                let entry_acc = if i < ctx.remaining_accounts.len() {
+                    let acc = &ctx.remaining_accounts[i];
+                    let is_match = if let Ok(data) = acc.try_borrow_data() {
+                        data.len() >= PlayerEntry::LEN && &data[40..72] == input.winner.as_ref()
+                    } else {
+                        false
+                    };
+                    if is_match {
+                        acc
+                    } else {
+                        ctx.remaining_accounts
+                            .iter()
+                            .find(|acc| {
+                                if let Ok(data) = acc.try_borrow_data() {
+                                    data.len() >= PlayerEntry::LEN && &data[40..72] == input.winner.as_ref()
+                                } else {
+                                    false
+                                }
+                            })
+                            .ok_or(ErrorCode::InvalidWinnerEntry)?
+                    }
+                } else {
+                    ctx.remaining_accounts
+                        .iter()
+                        .find(|acc| {
+                            if let Ok(data) = acc.try_borrow_data() {
+                                data.len() >= PlayerEntry::LEN && &data[40..72] == input.winner.as_ref()
+                            } else {
+                                false
+                            }
+                        })
+                        .ok_or(ErrorCode::InvalidWinnerEntry)?
+                };
+
                 require!(
                     entry_acc.owner == ctx.program_id,
+                    ErrorCode::InvalidWinnerEntry
+                );
+
+                let data = entry_acc.try_borrow_data()?;
+                require!(
+                    data.len() >= PlayerEntry::LEN,
+                    ErrorCode::InvalidWinnerEntry
+                );
+                let bump = data[72];
+                let expected_entry_pda = Pubkey::create_program_address(
+                    &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[bump]],
+                    ctx.program_id,
+                )
+                .map_err(|_| ErrorCode::InvalidWinnerEntry)?;
+
+                require!(
+                    entry_acc.key() == expected_entry_pda,
                     ErrorCode::InvalidWinnerEntry
                 );
             }

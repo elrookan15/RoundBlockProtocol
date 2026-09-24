@@ -15,7 +15,12 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  findWinnerRemainingAccountMetas,
+} from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -190,11 +195,17 @@ describe("league-escrow", () => {
       expect(account.status).to.deep.equal({ locked: {} });
     });
 
-    it("Resolves the SOL league", async () => {
+    it("Resolves the SOL league with remaining accounts PDA validation", async () => {
       const winners = [
         { winner: player1.publicKey, payout: new anchor.BN(150000000) },
         { winner: player2.publicKey, payout: new anchor.BN(50000000) },
       ];
+
+      const remainingAccounts = findWinnerRemainingAccountMetas(
+        leaguePda,
+        [player1.publicKey, player2.publicKey],
+        program.programId,
+      );
 
       await (program.methods as any)
         .resolveLeague(winners)
@@ -202,6 +213,7 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts(remainingAccounts)
         .signers([oracle])
         .rpc();
 
