@@ -463,6 +463,34 @@ describe("league-escrow", () => {
       expect(account.paymentMint.toBase58()).to.equal(mint.toBase58());
     });
 
+    it("Fails to join SPL league with token account authority mismatch", async () => {
+      const [entry2Pda] = findEntryPda(
+        leaguePda,
+        player2.publicKey,
+        program.programId,
+      );
+
+      try {
+        await (program.methods as any)
+          .joinLeagueSpl()
+          .accounts({
+            league: leaguePda,
+            entry: entry2Pda,
+            vault: vaultPda,
+            paymentMint: mint,
+            playerToken: player1TokenAccount,
+            player: player2.publicKey,
+            systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([player2])
+          .rpc();
+        expect.fail("Should have failed with token authority mismatch");
+      } catch (err: any) {
+        expect(err.toString()).to.include("ConstraintTokenOwner");
+      }
+    });
+
     it("Joins the SPL league", async () => {
       await (program.methods as any)
         .joinLeagueSpl()
