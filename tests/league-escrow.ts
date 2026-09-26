@@ -190,7 +190,28 @@ describe("league-escrow", () => {
       expect(account.status).to.deep.equal({ locked: {} });
     });
 
-    it("Resolves the SOL league", async () => {
+    it("Fails to resolve league when winner entry accounts are missing", async () => {
+      const winners = [
+        { winner: player1.publicKey, payout: new anchor.BN(150000000) },
+        { winner: player2.publicKey, payout: new anchor.BN(50000000) },
+      ];
+
+      try {
+        await (program.methods as any)
+          .resolveLeague(winners)
+          .accounts({
+            league: leaguePda,
+            authority: oracle.publicKey,
+          })
+          .signers([oracle])
+          .rpc();
+        expect.fail("Should have failed with InvalidWinnerEntry");
+      } catch (err: any) {
+        expect(err.toString()).to.include("InvalidWinnerEntry");
+      }
+    });
+
+    it("Resolves the SOL league with valid player entry accounts", async () => {
       const winners = [
         { winner: player1.publicKey, payout: new anchor.BN(150000000) },
         { winner: player2.publicKey, payout: new anchor.BN(50000000) },
@@ -202,6 +223,10 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
         .signers([oracle])
         .rpc();
 
