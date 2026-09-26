@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-14
+trigger_pattern: Optional `remaining_accounts` verification in Anchor resolution instruction and $O(N \times 256)$ off-curve PDA derivation CU overhead
+bad_assumption: Assumed `if !ctx.remaining_accounts.is_empty()` was sufficient for winner account validation, and `find_program_address` loop was CU-efficient
+what_actually_happened: Skipping remaining account validation when empty allowed unentered winner addresses to be recorded, and `find_program_address` performed iterative hashing loops per winner consuming excessive compute units
+corrective_rule: Enforce mandatory winner `PlayerEntry` account validation in `remaining_accounts` for all winners, and derive expected PDAs in $O(1)$ constant time using `create_program_address` with `entry.bump` extracted from account data
+regression_test: `tests/league-escrow.ts` test case for "Fails to resolve league when winner entry accounts are missing"
+confidence_adjustment: Treat optional `remaining_accounts` checks in Anchor program instructions as Critical security risks
+source: audit sweep

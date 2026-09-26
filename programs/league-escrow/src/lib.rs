@@ -150,21 +150,36 @@ pub mod league_escrow {
                 ErrorCode::InvalidWinners
             );
 
-            if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
-                    .remaining_accounts
-                    .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
-                    .ok_or(ErrorCode::InvalidWinnerEntry)?;
-                require!(
-                    entry_acc.owner == ctx.program_id,
-                    ErrorCode::InvalidWinnerEntry
-                );
-            }
+            let entry_acc = ctx
+                .remaining_accounts
+                .iter()
+                .find(|acc| {
+                    if acc.owner != ctx.program_id || acc.data_len() < PlayerEntry::LEN {
+                        return false;
+                    }
+                    let data = acc.data.borrow();
+                    if let Ok(entry) = PlayerEntry::try_deserialize(&mut &data[..]) {
+                        entry.league == league_key && entry.player == input.winner
+                    } else {
+                        false
+                    }
+                })
+                .ok_or(ErrorCode::InvalidWinnerEntry)?;
+
+            let data = entry_acc.data.borrow();
+            let entry = PlayerEntry::try_deserialize(&mut &data[..])
+                .map_err(|_| ErrorCode::InvalidWinnerEntry)?;
+
+            let expected_entry_pda = Pubkey::create_program_address(
+                &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[entry.bump]],
+                ctx.program_id,
+            )
+            .map_err(|_| ErrorCode::InvalidWinnerEntry)?;
+
+            require!(
+                entry_acc.key() == expected_entry_pda,
+                ErrorCode::InvalidWinnerEntry
+            );
 
             winners.push(WinnerSplit {
                 winner: input.winner,
