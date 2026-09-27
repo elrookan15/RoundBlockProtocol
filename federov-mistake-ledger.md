@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: Iterative `Pubkey::find_program_address` inside remaining accounts validation loops
+bad_assumption: Assumed `find_program_address` runtime cost inside loops over dynamically bounded input vectors (winners/players) was negligible
+what_actually_happened: Loop execution consumed excessive Compute Units (CUs) per winner by brute-forcing bump search from 255 down, risking transaction failure on larger winner lists
+corrective_rule: Use O(1) single-pass validation via `Pubkey::create_program_address` with stored PDA bump seeds from deserialized account state, combined with strict account field constraints (`entry.league == league_key` and `entry.player == input.winner`)
+regression_test: `tests/league-escrow.ts` test case for "Resolves the SOL league with remaining_accounts entry validation"
+confidence_adjustment: Require O(1) PDA verification benchmarks for all loop-bound account validations in Anchor programs
+source: audit sweep

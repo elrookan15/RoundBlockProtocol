@@ -151,17 +151,31 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
+                let (entry_acc, entry) = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .filter(|acc| acc.owner == ctx.program_id)
+                    .find_map(|acc| {
+                        let mut entry_data: &[u8] = &acc.data.borrow();
+                        let entry = PlayerEntry::try_deserialize(&mut entry_data).ok()?;
+                        if entry.league == league_key && entry.player == input.winner {
+                            Some((acc, entry))
+                        } else {
+                            None
+                        }
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
+
+                let seeds = &[
+                    b"entry",
+                    league_key.as_ref(),
+                    input.winner.as_ref(),
+                    &[entry.bump],
+                ];
+                let expected_pda = Pubkey::create_program_address(seeds, ctx.program_id)
+                    .map_err(|_| error!(ErrorCode::InvalidWinnerEntry))?;
                 require!(
-                    entry_acc.owner == ctx.program_id,
+                    entry_acc.key() == expected_pda,
                     ErrorCode::InvalidWinnerEntry
                 );
             }
