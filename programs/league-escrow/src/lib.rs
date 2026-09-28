@@ -144,6 +144,7 @@ pub mod league_escrow {
         let mut winners = Vec::with_capacity(winner_inputs.len());
 
         for input in &winner_inputs {
+            require!(input.winner != Pubkey::default(), ErrorCode::InvalidWinners);
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
             require!(
                 !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
@@ -151,19 +152,21 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
+                let _entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id {
+                            return false;
+                        }
+                        if let Ok(data) = acc.try_borrow_data() {
+                            if let Ok(entry) = PlayerEntry::try_deserialize(&mut &data[..]) {
+                                return entry.league == league_key && entry.player == input.winner;
+                            }
+                        }
+                        false
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
-                require!(
-                    entry_acc.owner == ctx.program_id,
-                    ErrorCode::InvalidWinnerEntry
-                );
             }
 
             winners.push(WinnerSplit {
@@ -383,6 +386,11 @@ pub mod league_escrow {
             _ => return err!(ErrorCode::InvalidLeagueStatus),
         }
 
+        require!(
+            ctx.accounts.vault.amount == 0,
+            ErrorCode::UnclaimedPayouts
+        );
+
         let admin_key = league.admin;
         let league_id_bytes = league.league_id.to_le_bytes();
         let bump = league.bump;
@@ -567,6 +575,7 @@ pub struct ClaimPayoutSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = winner,
     )]
     pub winner_token: Account<'info, TokenAccount>,
     #[account(mut)]
@@ -632,6 +641,7 @@ pub struct RefundSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = player,
     )]
     pub player_token: Account<'info, TokenAccount>,
     #[account(mut)]
