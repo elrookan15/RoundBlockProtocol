@@ -21,17 +21,35 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
   programId: LEAGUE_ESCROW_PROGRAM_ID,
 };
 
+// Static seed buffers to prevent repetitive allocations
+const SEED_LEAGUE = Buffer.from("league");
+const SEED_ENTRY = Buffer.from("entry");
+const SEED_VAULT = Buffer.from("vault");
+
+/**
+ * Converts a input league ID into a 8-byte little-endian Buffer.
+ */
+export function leagueIdToBuffer(
+  leagueId: number | bigint | BN | string,
+): Buffer {
+  const bn = BN.isBN(leagueId) ? leagueId : new BN(leagueId.toString());
+  if (bn.isNeg()) {
+    throw new Error("League ID must be a non-negative integer");
+  }
+  return bn.toArrayLike(Buffer, "le", 8);
+}
+
 /**
  * Finds the Program Derived Address (PDA) for a League account.
  */
 export function findLeaguePda(
   admin: PublicKey,
-  leagueId: number | bigint | BN,
+  leagueId: number | bigint | BN | string,
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
-  const bn = BN.isBN(leagueId) ? leagueId : new BN(leagueId.toString());
+  const leagueIdBuffer = leagueIdToBuffer(leagueId);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("league"), admin.toBuffer(), bn.toArrayLike(Buffer, "le", 8)],
+    [SEED_LEAGUE, admin.toBuffer(), leagueIdBuffer],
     programId,
   );
 }
@@ -45,7 +63,7 @@ export function findEntryPda(
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("entry"), leaguePda.toBuffer(), player.toBuffer()],
+    [SEED_ENTRY, leaguePda.toBuffer(), player.toBuffer()],
     programId,
   );
 }
@@ -58,7 +76,7 @@ export function findVaultPda(
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), leaguePda.toBuffer()],
+    [SEED_VAULT, leaguePda.toBuffer()],
     programId,
   );
 }
