@@ -15,9 +15,39 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  calculateLeagueSpace,
+} from "../index";
 
 describe("league-escrow", () => {
+  describe("SDK Utilities & Validation", () => {
+    it("Calculates correct League space matching Rust formula", () => {
+      expect(calculateLeagueSpace(1)).to.equal(
+        8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + (4 + 1 * 41) + 1 + 1,
+      ); // 178 bytes
+      expect(calculateLeagueSpace(10)).to.equal(
+        8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + (4 + 10 * 41) + 1 + 1,
+      ); // 547 bytes
+      expect(calculateLeagueSpace(12)).to.equal(
+        8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + (4 + 12 * 41) + 1 + 1,
+      ); // 629 bytes
+    });
+
+    it("Rejects invalid maxPlayers values in calculateLeagueSpace", () => {
+      expect(() => calculateLeagueSpace(0)).to.throw("Invalid maxPlayers");
+      expect(() => calculateLeagueSpace(256)).to.throw("Invalid maxPlayers");
+      expect(() => calculateLeagueSpace(1.5)).to.throw("Invalid maxPlayers");
+    });
+
+    it("Rejects negative leagueId in findLeaguePda", () => {
+      const dummyAdmin = Keypair.generate().publicKey;
+      expect(() => findLeaguePda(dummyAdmin, -1)).to.throw("Invalid leagueId");
+    });
+  });
+
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
@@ -481,6 +511,135 @@ describe("league-escrow", () => {
 
       const vaultAccount = await getAccount(provider.connection, vaultPda);
       expect(Number(vaultAccount.amount)).to.equal(50000000);
+    });
+  });
+
+  describe("Resolution with remaining_accounts and Currency Guard Enforcement", () => {
+    const solLeagueId = new anchor.BN(701);
+    const splLeagueId = new anchor.BN(702);
+    const entryFee = new anchor.BN(10000000);
+    const maxPlayers = 2;
+
+    let solLeaguePda: PublicKey;
+    let solEntryPda: PublicKey;
+    let splLeaguePda: PublicKey;
+    let splVaultPda: PublicKey;
+
+    before(async () => {
+      [solLeaguePda] = findLeaguePda(
+        admin.publicKey,
+        solLeagueId,
+        program.programId,
+      );
+      [solEntryPda] = findEntryPda(
+        solLeaguePda,
+        player1.publicKey,
+        program.programId,
+      );
+
+      [splLeaguePda] = findLeaguePda(
+        admin.publicKey,
+        splLeagueId,
+        program.programId,
+      );
+      [splVaultPda] = findVaultPda(splLeaguePda, program.programId);
+
+      // Create & setup SOL League
+      await (program.methods as any)
+        .createLeague(solLeagueId, entryFee, maxPlayers)
+        .accounts({
+          league: solLeaguePda,
+          admin: admin.publicKey,
+          oracle: oracle.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .joinLeague()
+        .accounts({
+          league: solLeaguePda,
+          entry: solEntryPda,
+          player: player1.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .lockLeague()
+        .accounts({
+          league: solLeaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      // Create SPL League
+      await (program.methods as any)
+        .createLeagueSpl(splLeagueId, entryFee, maxPlayers)
+        .accounts({
+          league: splLeaguePda,
+          vault: splVaultPda,
+          paymentMint: mint,
+          admin: admin.publicKey,
+          oracle: oracle.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .rpc();
+    });
+
+    it("Resolves SOL league providing player entry PDA in remaining_accounts", async () => {
+      const winners = [{ winner: player1.publicKey, payout: entryFee }];
+
+      await (program.methods as any)
+        .resolveLeague(winners)
+        .accounts({
+          league: solLeaguePda,
+          authority: oracle.publicKey,
+        })
+        .remainingAccounts([
+          { pubkey: solEntryPda, isWritable: false, isSigner: false },
+        ])
+        .signers([oracle])
+        .rpc();
+
+      const account = await (program.account as any).league.fetch(solLeaguePda);
+      expect(account.status).to.deep.equal({ resolved: {} });
+    });
+
+    it("Fails to close_league on SPL league via SOL close instruction", async () => {
+      try {
+        await (program.methods as any)
+          .closeLeague()
+          .accounts({
+            league: splLeaguePda,
+            admin: admin.publicKey,
+          })
+          .rpc();
+        expect.fail("Should have failed with WrongCurrency");
+      } catch (err: any) {
+        expect(err.toString()).to.include("WrongCurrency");
+      }
+    });
+
+    it("Fails to close_league_spl on SOL league via SPL close instruction", async () => {
+      try {
+        await (program.methods as any)
+          .closeLeagueSpl()
+          .accounts({
+            league: solLeaguePda,
+            vault: splVaultPda, // Dummy or unused
+            paymentMint: mint,
+            admin: admin.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .rpc();
+        expect.fail("Should have failed with WrongCurrency");
+      } catch (err: any) {
+        expect(err.toString()).to.include("WrongCurrency");
+      }
     });
   });
 });
