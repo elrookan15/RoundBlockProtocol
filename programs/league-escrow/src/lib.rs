@@ -138,6 +138,10 @@ pub mod league_escrow {
             winner_inputs.len() <= league.max_players as usize,
             ErrorCode::InvalidWinners
         );
+        require!(
+            winner_inputs.len() <= league.player_count as usize,
+            ErrorCode::InvalidWinners
+        );
 
         let league_key = league.key();
         let mut total_payout: u64 = 0;
@@ -151,14 +155,29 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id {
+                            return false;
+                        }
+                        let data = acc.data.borrow();
+                        if data.len() >= PlayerEntry::LEN {
+                            let bump = data[72];
+                            if let Ok(expected_pda) = Pubkey::create_program_address(
+                                &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[bump]],
+                                ctx.program_id,
+                            ) {
+                                return acc.key() == expected_pda;
+                            }
+                        }
+                        let (expected_pda, _) = Pubkey::find_program_address(
+                            &[b"entry", league_key.as_ref(), input.winner.as_ref()],
+                            ctx.program_id,
+                        );
+                        acc.key() == expected_pda
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
                 require!(
                     entry_acc.owner == ctx.program_id,
@@ -174,7 +193,6 @@ pub mod league_escrow {
         }
 
         require!(total_payout <= league.total_pot, ErrorCode::ExceedsTotalPot);
-        require!(winners.len() <= league.player_count as usize, ErrorCode::InvalidWinners);
 
         league.winners = winners;
         league.status = LeagueStatus::Resolved;
@@ -343,6 +361,7 @@ pub mod league_escrow {
     pub fn close_league(ctx: Context<CloseLeague>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        require!(league.payment_mint.is_none(), ErrorCode::WrongCurrency);
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -366,6 +385,11 @@ pub mod league_escrow {
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(
+            payment_mint == ctx.accounts.payment_mint.key(),
+            ErrorCode::WrongCurrency
+        );
 
         match league.status {
             LeagueStatus::Resolved => {
