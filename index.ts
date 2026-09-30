@@ -9,6 +9,24 @@ export const LEAGUE_ESCROW_PROGRAM_ID = new PublicKey(
   "YG5dVJydevZcHJQtLNirYUseJtYQQoK83uPMznXVUbW",
 );
 
+export enum LeagueStatus {
+  Open = 0,
+  Locked = 1,
+  Resolved = 2,
+  Cancelled = 3,
+}
+
+export interface WinnerSplit {
+  winner: PublicKey;
+  payout: BN;
+  claimed: boolean;
+}
+
+export interface WinnerInput {
+  winner: PublicKey;
+  payout: BN;
+}
+
 export interface RoundBlockConfig {
   network: string;
   rpcUrl: string;
@@ -20,6 +38,32 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
   rpcUrl: "https://api.devnet.solana.com",
   programId: LEAGUE_ESCROW_PROGRAM_ID,
 };
+
+/**
+ * Calculates account space in bytes required for a League account.
+ */
+export function calculateLeagueSpace(maxPlayers: number): number {
+  return (
+    8 + // discriminator
+    32 + // admin
+    32 + // oracle
+    8 + // league_id
+    8 + // entry_fee
+    1 + // max_players
+    1 + // player_count
+    1 + // status
+    8 + // total_pot
+    33 + // payment_mint (1 + 32)
+    (4 + maxPlayers * (32 + 8 + 1)) + // winners vector
+    1 + // bump
+    1 // vault_bump
+  );
+}
+
+/**
+ * Account size in bytes for a PlayerEntry account.
+ */
+export const PLAYER_ENTRY_SPACE = 8 + 32 + 32 + 1; // 73 bytes
 
 /**
  * Finds the Program Derived Address (PDA) for a League account.

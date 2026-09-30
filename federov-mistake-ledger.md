@@ -56,3 +56,25 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: Executing `Pubkey::find_program_address` in on-chain loops over remaining accounts during Anchor instruction resolution (`resolve_league`)
+bad_assumption: Assumed `find_program_address` is cheap enough for iteration inside loops over remaining accounts on Solana
+what_actually_happened: `find_program_address` iterates bumps 255 down to 0 using sha256 hashes, consuming up to 256 hash operations per account and risking compute unit exhaustion on large winner arrays
+corrective_rule: Use `Pubkey::create_program_address` with the bump extracted from account data (e.g. `PlayerEntry::bump` at offset 72) for O(1) PDA derivation when validating remaining accounts
+regression_test: `tests/league-escrow.ts` test case for "Resolves the SOL league with remainingAccounts O(1) PDA validation"
+confidence_adjustment: Treat any on-chain loop calling `find_program_address` as High CU risk
+source: audit sweep
+
+## M-007
+
+date: 2026-09-15
+trigger_pattern: Payout claim instructions (`claim_payout`, `claim_payout_spl`) transferring lamports/tokens without checked-decrementing `league.total_pot`
+bad_assumption: Assumed `total_pot` only mattered during `join_league` / `refund` and did not need to reflect claimed payouts
+what_actually_happened: `league.total_pot` remained non-zero after payouts were claimed, violating state accounting invariant symmetry (`total_pot == 0` when all payouts/refunds are distributed)
+corrective_rule: Pair all payout claims with checked decrements on `league.total_pot` (`total_pot.checked_sub(payout)`)
+regression_test: `tests/league-escrow.ts` assertion on `league.total_pot == 0` post-claims
+confidence_adjustment: Enforce strict state accounting balance symmetry across all debit/credit instructions
+source: audit sweep

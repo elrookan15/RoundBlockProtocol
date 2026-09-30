@@ -15,7 +15,13 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  calculateLeagueSpace,
+  PLAYER_ENTRY_SPACE,
+} from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -80,6 +86,16 @@ describe("league-escrow", () => {
       admin,
       1000000000,
     );
+  });
+
+  describe("SDK Helper & Space Validation", () => {
+    it("Matches calculateLeagueSpace with contract space formula", () => {
+      const space10 = calculateLeagueSpace(10);
+      expect(space10).to.equal(
+        8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + (4 + 10 * 41) + 1 + 1,
+      );
+      expect(PLAYER_ENTRY_SPACE).to.equal(73);
+    });
   });
 
   describe("SOL League Lifecycle", () => {
@@ -190,7 +206,7 @@ describe("league-escrow", () => {
       expect(account.status).to.deep.equal({ locked: {} });
     });
 
-    it("Resolves the SOL league", async () => {
+    it("Resolves the SOL league with remainingAccounts O(1) PDA validation", async () => {
       const winners = [
         { winner: player1.publicKey, payout: new anchor.BN(150000000) },
         { winner: player2.publicKey, payout: new anchor.BN(50000000) },
@@ -202,6 +218,10 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
         .signers([oracle])
         .rpc();
 
@@ -225,7 +245,7 @@ describe("league-escrow", () => {
       }
     });
 
-    it("Claims payout for player 1 and player 2 then closes league", async () => {
+    it("Claims payout for player 1 and player 2 with state total_pot decrements then closes league", async () => {
       const preBalance1 = await provider.connection.getBalance(
         player1.publicKey,
       );
@@ -244,6 +264,9 @@ describe("league-escrow", () => {
       );
       expect(postBalance1).to.be.greaterThan(preBalance1);
 
+      let account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.totalPot.toNumber()).to.equal(50000000);
+
       await (program.methods as any)
         .claimPayout()
         .accounts({
@@ -252,6 +275,9 @@ describe("league-escrow", () => {
         })
         .signers([player2])
         .rpc();
+
+      account = await (program.account as any).league.fetch(leaguePda);
+      expect(account.totalPot.toNumber()).to.equal(0);
 
       await (program.methods as any)
         .closeLeague()
