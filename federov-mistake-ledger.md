@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-15
+trigger_pattern: Calling `Pubkey::find_program_address` inside instruction iteration loops (`resolve_league`)
+bad_assumption: Assumed calling `find_program_address` repeatedly for remaining accounts in loop is low cost
+what_actually_happened: `find_program_address` performs up to 256 SHA-256 iterations per PDA, leading to potential compute unit (CU) budget exhaustion when resolving leagues with multiple winners
+corrective_rule: Avoid `find_program_address` inside instruction runtime hotpaths; deserialize stored `bump` seeds from deserialized account data and verify via `Pubkey::create_program_address` in O(1) time
+regression_test: `cargo check --manifest-path programs/league-escrow/Cargo.toml` and remaining accounts verification in `programs/league-escrow/src/lib.rs`
+confidence_adjustment: Flag any runtime loop using `find_program_address` as High CU risk and require stored-bump `create_program_address`
+source: deep performance audit

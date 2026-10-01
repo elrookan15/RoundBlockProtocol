@@ -151,19 +151,26 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
-                    .remaining_accounts
+                ctx.remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id {
+                            return false;
+                        }
+                        let mut data: &[u8] = &acc.data.borrow();
+                        if let Ok(entry) = PlayerEntry::try_deserialize(&mut data) {
+                            if entry.league == league_key && entry.player == input.winner {
+                                if let Ok(expected_pda) = Pubkey::create_program_address(
+                                    &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[entry.bump]],
+                                    ctx.program_id,
+                                ) {
+                                    return expected_pda == acc.key();
+                                }
+                            }
+                        }
+                        false
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
-                require!(
-                    entry_acc.owner == ctx.program_id,
-                    ErrorCode::InvalidWinnerEntry
-                );
             }
 
             winners.push(WinnerSplit {
@@ -366,6 +373,8 @@ pub mod league_escrow {
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(payment_mint == ctx.accounts.payment_mint.key(), ErrorCode::WrongCurrency);
 
         match league.status {
             LeagueStatus::Resolved => {
