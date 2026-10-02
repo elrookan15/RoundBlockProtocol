@@ -190,7 +190,7 @@ describe("league-escrow", () => {
       expect(account.status).to.deep.equal({ locked: {} });
     });
 
-    it("Resolves the SOL league", async () => {
+    it("Resolves the SOL league with remaining accounts player entry verification", async () => {
       const winners = [
         { winner: player1.publicKey, payout: new anchor.BN(150000000) },
         { winner: player2.publicKey, payout: new anchor.BN(50000000) },
@@ -202,6 +202,10 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
         .signers([oracle])
         .rpc();
 
@@ -481,6 +485,106 @@ describe("league-escrow", () => {
 
       const vaultAccount = await getAccount(provider.connection, vaultPda);
       expect(Number(vaultAccount.amount)).to.equal(50000000);
+    });
+
+    it("Locks, resolves, claims payout, and closes SPL league safely with close_league_spl", async () => {
+      let adminTokenAccount = await createAccount(
+        provider.connection,
+        admin,
+        mint,
+        admin.publicKey,
+      );
+
+      await (program.methods as any)
+        .lockLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      const winners = [
+        { winner: player1.publicKey, payout: new anchor.BN(50000000) },
+      ];
+
+      await (program.methods as any)
+        .resolveLeague(winners)
+        .accounts({
+          league: leaguePda,
+          authority: oracle.publicKey,
+        })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+        ])
+        .signers([oracle])
+        .rpc();
+
+      await (program.methods as any)
+        .claimPayoutSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          winnerToken: player1TokenAccount,
+          winner: player1.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      await (program.methods as any)
+        .closeLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          adminToken: adminTokenAccount,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      const closedLeague = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedLeague).to.be.null;
+    });
+  });
+
+  describe("TypeScript SDK Validation & Guardrails", () => {
+    it("Validates u64 integer bounds in findLeaguePda", () => {
+      expect(() =>
+        findLeaguePda(admin.publicKey, -1, program.programId),
+      ).to.throw(RangeError);
+
+      expect(() =>
+        findLeaguePda(
+          admin.publicKey,
+          new anchor.BN("18446744073709551616"),
+          program.programId,
+        ),
+      ).to.throw(RangeError);
+
+      const [validPda] = findLeaguePda(
+        admin.publicKey,
+        new anchor.BN("18446744073709551615"),
+        program.programId,
+      );
+      expect(validPda).to.be.instanceOf(PublicKey);
+    });
+
+    it("Rejects non-PublicKey inputs in SDK functions", () => {
+      expect(() => findLeaguePda(null as any, 1, program.programId)).to.throw(
+        TypeError,
+      );
+
+      expect(() =>
+        findEntryPda(null as any, player1.publicKey, program.programId),
+      ).to.throw(TypeError);
+
+      expect(() => findVaultPda(null as any, program.programId)).to.throw(
+        TypeError,
+      );
     });
   });
 });
