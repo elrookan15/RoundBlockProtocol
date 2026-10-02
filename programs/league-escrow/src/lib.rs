@@ -151,19 +151,33 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
+                let _entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id || acc.data_len() != PlayerEntry::LEN {
+                            return false;
+                        }
+                        let mut data_slice: &[u8] = &acc.data.borrow();
+                        if let Ok(entry_data) = PlayerEntry::try_deserialize(&mut data_slice) {
+                            if entry_data.league == league_key && entry_data.player == input.winner {
+                                let bump_slice = [entry_data.bump];
+                                let seeds = [
+                                    b"entry",
+                                    league_key.as_ref(),
+                                    input.winner.as_ref(),
+                                    &bump_slice,
+                                ];
+                                if let Ok(expected_pda) =
+                                    Pubkey::create_program_address(&seeds, ctx.program_id)
+                                {
+                                    return expected_pda == acc.key();
+                                }
+                            }
+                        }
+                        false
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
-                require!(
-                    entry_acc.owner == ctx.program_id,
-                    ErrorCode::InvalidWinnerEntry
-                );
             }
 
             winners.push(WinnerSplit {
@@ -383,6 +397,7 @@ pub mod league_escrow {
             _ => return err!(ErrorCode::InvalidLeagueStatus),
         }
 
+        let vault = &ctx.accounts.vault;
         let admin_key = league.admin;
         let league_id_bytes = league.league_id.to_le_bytes();
         let bump = league.bump;
@@ -393,6 +408,23 @@ pub mod league_escrow {
             &[bump],
         ];
         let signer_seeds = &[&seeds[..]];
+
+        if vault.amount > 0 {
+            let admin_token = ctx
+                .accounts
+                .admin_token
+                .as_ref()
+                .ok_or(ErrorCode::VaultNotEmpty)?;
+
+            let cpi_accounts = Transfer {
+                from: vault.to_account_info(),
+                to: admin_token.to_account_info(),
+                authority: league.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.to_account_info();
+            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+            token::transfer(cpi_ctx, vault.amount)?;
+        }
 
         let cpi_accounts = token::CloseAccount {
             account: ctx.accounts.vault.to_account_info(),
@@ -672,6 +704,11 @@ pub struct CloseLeagueSpl<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
     pub payment_mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        token::mint = payment_mint,
+    )]
+    pub admin_token: Option<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub admin: Signer<'info>,
     pub token_program: Program<'info, Token>,
@@ -781,4 +818,6 @@ pub enum ErrorCode {
     InvalidLeagueStatus,
     #[msg("Invalid winner entry account.")]
     InvalidWinnerEntry,
+    #[msg("Vault token balance is non-zero and no admin token account provided.")]
+    VaultNotEmpty,
 }
