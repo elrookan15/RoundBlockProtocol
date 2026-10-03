@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-14
+trigger_pattern: Account teardown instruction on multi-currency escrow lacking explicit `payment_mint` verification guard
+bad_assumption: Assumed `close_league` instruction routing was sufficiently segregated between native SOL and SPL paths without explicit runtime `payment_mint` check
+what_actually_happened: Executing non-SPL `close_league` on an SPL token league would close the `League` PDA account while leaving the associated token vault account orphaned
+corrective_rule: Enforce explicit `payment_mint` guards on both native SOL (`payment_mint.is_none()`) and SPL (`payment_mint == Some(mint)`) lifecycle teardown instructions
+regression_test: `tests/league-escrow.ts` test case for currency mismatch on `close_league` / `close_league_spl`
+confidence_adjustment: Flag dual-currency instruction entrypoints lacking explicit mint guards as High risk until verified
+source: audit sweep

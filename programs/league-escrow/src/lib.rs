@@ -343,6 +343,7 @@ pub mod league_escrow {
     pub fn close_league(ctx: Context<CloseLeague>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        require!(league.payment_mint.is_none(), ErrorCode::WrongCurrency);
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -366,6 +367,11 @@ pub mod league_escrow {
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(
+            payment_mint == ctx.accounts.payment_mint.key(),
+            ErrorCode::WrongCurrency
+        );
 
         match league.status {
             LeagueStatus::Resolved => {
