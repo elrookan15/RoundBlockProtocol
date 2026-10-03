@@ -225,6 +225,25 @@ describe("league-escrow", () => {
       }
     });
 
+    it("Fails to close SOL league using closeLeagueSpl", async () => {
+      const [vaultPda] = findVaultPda(leaguePda, program.programId);
+      try {
+        await (program.methods as any)
+          .closeLeagueSpl()
+          .accounts({
+            league: leaguePda,
+            vault: vaultPda,
+            paymentMint: mint,
+            admin: admin.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .rpc();
+        expect.fail("Should have failed with WrongCurrency");
+      } catch (err: any) {
+        expect(err.toString()).to.include("WrongCurrency");
+      }
+    });
+
     it("Claims payout for player 1 and player 2 then closes league", async () => {
       const preBalance1 = await provider.connection.getBalance(
         player1.publicKey,
@@ -481,6 +500,61 @@ describe("league-escrow", () => {
 
       const vaultAccount = await getAccount(provider.connection, vaultPda);
       expect(Number(vaultAccount.amount)).to.equal(50000000);
+    });
+
+    it("Fails to close SPL league using closeLeague (non-SPL endpoint)", async () => {
+      // First lock and cancel or resolve the league so status permits close check
+      await (program.methods as any)
+        .cancelLeague()
+        .accounts({
+          league: leaguePda,
+          admin: admin.publicKey,
+        })
+        .rpc();
+
+      await (program.methods as any)
+        .refundSpl()
+        .accounts({
+          league: leaguePda,
+          entry: entry1Pda,
+          vault: vaultPda,
+          paymentMint: mint,
+          playerToken: player1TokenAccount,
+          player: player1.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([player1])
+        .rpc();
+
+      try {
+        await (program.methods as any)
+          .closeLeague()
+          .accounts({
+            league: leaguePda,
+            admin: admin.publicKey,
+          })
+          .rpc();
+        expect.fail("Should have failed with WrongCurrency");
+      } catch (err: any) {
+        expect(err.toString()).to.include("WrongCurrency");
+      }
+
+      // Now close correctly with closeLeagueSpl
+      await (program.methods as any)
+        .closeLeagueSpl()
+        .accounts({
+          league: leaguePda,
+          vault: vaultPda,
+          paymentMint: mint,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      const closedAccount = await (program.account as any).league.fetchNullable(
+        leaguePda,
+      );
+      expect(closedAccount).to.be.null;
     });
   });
 });
