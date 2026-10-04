@@ -14,6 +14,7 @@ pub mod league_escrow {
         max_players: u8,
     ) -> Result<()> {
         require!(max_players > 0, ErrorCode::InvalidMaxPlayers);
+        require!(max_players <= 200, ErrorCode::InvalidMaxPlayers);
 
         let league = &mut ctx.accounts.league;
         league.admin = ctx.accounts.admin.key();
@@ -38,6 +39,7 @@ pub mod league_escrow {
         max_players: u8,
     ) -> Result<()> {
         require!(max_players > 0, ErrorCode::InvalidMaxPlayers);
+        require!(max_players <= 200, ErrorCode::InvalidMaxPlayers);
 
         let league = &mut ctx.accounts.league;
         league.admin = ctx.accounts.admin.key();
@@ -151,14 +153,39 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        if acc.owner != ctx.program_id {
+                            return false;
+                        }
+                        let data = match acc.try_borrow_data() {
+                            Ok(d) => d,
+                            Err(_) => return false,
+                        };
+                        let mut data_ref: &[u8] = &data;
+                        let entry_state = match PlayerEntry::try_deserialize(&mut data_ref) {
+                            Ok(e) => e,
+                            Err(_) => return false,
+                        };
+                        if entry_state.league != league_key || entry_state.player != input.winner {
+                            return false;
+                        }
+                        let expected_pda = match Pubkey::create_program_address(
+                            &[
+                                b"entry",
+                                league_key.as_ref(),
+                                input.winner.as_ref(),
+                                &[entry_state.bump],
+                            ],
+                            ctx.program_id,
+                        ) {
+                            Ok(pda) => pda,
+                            Err(_) => return false,
+                        };
+                        acc.key() == expected_pda
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
                 require!(
                     entry_acc.owner == ctx.program_id,

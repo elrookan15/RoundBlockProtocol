@@ -105,7 +105,7 @@ describe("league-escrow", () => {
       );
     });
 
-    it("Fails to create a league with max_players = 0", async () => {
+    it("Fails to create a league with max_players = 0 or max_players > 200", async () => {
       const zeroId = new anchor.BN(999);
       const [zeroPda] = findLeaguePda(
         admin.publicKey,
@@ -124,6 +124,28 @@ describe("league-escrow", () => {
           })
           .rpc();
         expect.fail("Should have failed with InvalidMaxPlayers");
+      } catch (err: any) {
+        expect(err.toString()).to.include("InvalidMaxPlayers");
+      }
+
+      const excessiveId = new anchor.BN(998);
+      const [excessivePda] = findLeaguePda(
+        admin.publicKey,
+        excessiveId,
+        program.programId,
+      );
+
+      try {
+        await (program.methods as any)
+          .createLeague(excessiveId, entryFee, 201)
+          .accounts({
+            league: excessivePda,
+            admin: admin.publicKey,
+            oracle: oracle.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        expect.fail("Should have failed with InvalidMaxPlayers for >200");
       } catch (err: any) {
         expect(err.toString()).to.include("InvalidMaxPlayers");
       }
