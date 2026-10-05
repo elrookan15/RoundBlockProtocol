@@ -51,6 +51,17 @@ export function findEntryPda(
 }
 
 /**
+ * Efficiently finds Program Derived Addresses (PDAs) for a batch of player entries.
+ */
+export function findEntryPdaBatch(
+  leaguePda: PublicKey,
+  players: PublicKey[],
+  programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
+): Array<[PublicKey, number]> {
+  return players.map((player) => findEntryPda(leaguePda, player, programId));
+}
+
+/**
  * Finds the Program Derived Address (PDA) for an SPL Vault token account.
  */
 export function findVaultPda(
@@ -61,4 +72,50 @@ export function findVaultPda(
     [Buffer.from("vault"), leaguePda.toBuffer()],
     programId,
   );
+}
+
+export interface WinnerSplitInput {
+  winner: PublicKey;
+  payout: BN;
+}
+
+/**
+ * Validates winner splits client-side prior to transaction construction.
+ * Ensures no duplicate winners and total payout <= total pot.
+ */
+export function validateWinnerSplits(
+  winnerInputs: WinnerSplitInput[],
+  totalPot: BN,
+  maxPlayers: number,
+): { valid: boolean; reason?: string } {
+  if (winnerInputs.length === 0) {
+    return { valid: false, reason: "Winner inputs cannot be empty" };
+  }
+  if (winnerInputs.length > maxPlayers) {
+    return {
+      valid: false,
+      reason: `Winner count (${winnerInputs.length}) exceeds max players (${maxPlayers})`,
+    };
+  }
+
+  const seen = new Set<string>();
+  let totalPayout = new BN(0);
+
+  for (const input of winnerInputs) {
+    const key = input.winner.toBase58();
+    if (seen.has(key)) {
+      return { valid: false, reason: `Duplicate winner detected: ${key}` };
+    }
+    seen.add(key);
+    totalPayout = totalPayout.add(input.payout);
+  }
+
+  if (totalPayout.gt(totalPot)) {
+    return {
+      valid: false,
+      reason: `Total payout (${totalPayout.toString()}) exceeds total pot (${totalPot.toString()})`,
+    };
+  }
+
+  return { valid: true };
 }

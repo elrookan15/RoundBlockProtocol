@@ -15,7 +15,13 @@ import {
   mintTo,
   getAccount,
 } from "@solana/spl-token";
-import { findLeaguePda, findEntryPda, findVaultPda } from "../index";
+import {
+  findLeaguePda,
+  findEntryPda,
+  findVaultPda,
+  findEntryPdaBatch,
+  validateWinnerSplits,
+} from "../index";
 
 describe("league-escrow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -80,6 +86,82 @@ describe("league-escrow", () => {
       admin,
       1000000000,
     );
+  });
+
+  describe("Client Helper Utilities", () => {
+    const dummyLeague = Keypair.generate().publicKey;
+    const playerA = Keypair.generate().publicKey;
+    const playerB = Keypair.generate().publicKey;
+
+    it("findEntryPdaBatch matches individual findEntryPda results", () => {
+      const batchResult = findEntryPdaBatch(dummyLeague, [playerA, playerB]);
+      const singleA = findEntryPda(dummyLeague, playerA);
+      const singleB = findEntryPda(dummyLeague, playerB);
+
+      expect(batchResult[0][0].toBase58()).to.equal(singleA[0].toBase58());
+      expect(batchResult[0][1]).to.equal(singleA[1]);
+      expect(batchResult[1][0].toBase58()).to.equal(singleB[0].toBase58());
+      expect(batchResult[1][1]).to.equal(singleB[1]);
+    });
+
+    it("validateWinnerSplits asserts valid, duplicate, empty, and overflow payouts", () => {
+      const totalPot = new anchor.BN(1000);
+      const maxPlayers = 2;
+
+      // Valid
+      const validRes = validateWinnerSplits(
+        [
+          { winner: playerA, payout: new anchor.BN(600) },
+          { winner: playerB, payout: new anchor.BN(400) },
+        ],
+        totalPot,
+        maxPlayers,
+      );
+      expect(validRes.valid).to.be.true;
+
+      // Empty
+      const emptyRes = validateWinnerSplits([], totalPot, maxPlayers);
+      expect(emptyRes.valid).to.be.false;
+      expect(emptyRes.reason).to.include("empty");
+
+      // Exceeds max players
+      const playerC = Keypair.generate().publicKey;
+      const exceedsPlayersRes = validateWinnerSplits(
+        [
+          { winner: playerA, payout: new anchor.BN(300) },
+          { winner: playerB, payout: new anchor.BN(300) },
+          { winner: playerC, payout: new anchor.BN(400) },
+        ],
+        totalPot,
+        maxPlayers,
+      );
+      expect(exceedsPlayersRes.valid).to.be.false;
+      expect(exceedsPlayersRes.reason).to.include("exceeds max players");
+
+      // Duplicate winner
+      const dupRes = validateWinnerSplits(
+        [
+          { winner: playerA, payout: new anchor.BN(500) },
+          { winner: playerA, payout: new anchor.BN(500) },
+        ],
+        totalPot,
+        maxPlayers,
+      );
+      expect(dupRes.valid).to.be.false;
+      expect(dupRes.reason).to.include("Duplicate winner");
+
+      // Exceeds total pot
+      const overflowRes = validateWinnerSplits(
+        [
+          { winner: playerA, payout: new anchor.BN(800) },
+          { winner: playerB, payout: new anchor.BN(300) },
+        ],
+        totalPot,
+        maxPlayers,
+      );
+      expect(overflowRes.valid).to.be.false;
+      expect(overflowRes.reason).to.include("exceeds total pot");
+    });
   });
 
   describe("SOL League Lifecycle", () => {
