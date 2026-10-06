@@ -190,7 +190,7 @@ describe("league-escrow", () => {
       expect(account.status).to.deep.equal({ locked: {} });
     });
 
-    it("Resolves the SOL league", async () => {
+    it("Resolves the SOL league with remaining accounts validation", async () => {
       const winners = [
         { winner: player1.publicKey, payout: new anchor.BN(150000000) },
         { winner: player2.publicKey, payout: new anchor.BN(50000000) },
@@ -202,6 +202,10 @@ describe("league-escrow", () => {
           league: leaguePda,
           authority: oracle.publicKey,
         })
+        .remainingAccounts([
+          { pubkey: entry1Pda, isWritable: false, isSigner: false },
+          { pubkey: entry2Pda, isWritable: false, isSigner: false },
+        ])
         .signers([oracle])
         .rpc();
 
@@ -395,6 +399,14 @@ describe("league-escrow", () => {
         leaguePda,
       );
       expect(closedAccount).to.be.null;
+    });
+  });
+
+  describe("Validation & Helper Edge Cases", () => {
+    it("Throws when findLeaguePda is given a negative leagueId", () => {
+      expect(() =>
+        findLeaguePda(admin.publicKey, -1, program.programId),
+      ).to.throw("leagueId cannot be negative");
     });
   });
 

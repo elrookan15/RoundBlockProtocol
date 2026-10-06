@@ -151,17 +151,33 @@ pub mod league_escrow {
             );
 
             if !ctx.remaining_accounts.is_empty() {
-                let (expected_entry_pda, _) = Pubkey::find_program_address(
-                    &[b"entry", league_key.as_ref(), input.winner.as_ref()],
-                    ctx.program_id,
-                );
-                let entry_acc = ctx
+                let (expected_entry_pda, entry_acc) = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find_map(|acc| {
+                        if acc.owner != ctx.program_id || acc.data_len() != PlayerEntry::LEN {
+                            return None;
+                        }
+                        let data = acc.data.borrow();
+                        if data[..8] != PlayerEntry::DISCRIMINATOR[..] {
+                            return None;
+                        }
+                        let bump = data[72];
+                        let derived_pda = Pubkey::create_program_address(
+                            &[b"entry", league_key.as_ref(), input.winner.as_ref(), &[bump]],
+                            ctx.program_id,
+                        ).ok()?;
+
+                        if acc.key() == derived_pda {
+                            Some((derived_pda, acc))
+                        } else {
+                            None
+                        }
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
+
                 require!(
-                    entry_acc.owner == ctx.program_id,
+                    entry_acc.key() == expected_entry_pda,
                     ErrorCode::InvalidWinnerEntry
                 );
             }
@@ -781,4 +797,24 @@ pub enum ErrorCode {
     InvalidLeagueStatus,
     #[msg("Invalid winner entry account.")]
     InvalidWinnerEntry,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_league_space_calculation() {
+        let space_1 = League::space(1);
+        // 8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + 4 + (1 * 41) + 1 + 1 = 179
+        assert_eq!(space_1, 179);
+
+        let space_10 = League::space(10);
+        assert_eq!(space_10, 179 + 9 * 41);
+    }
+
+    #[test]
+    fn test_player_entry_len() {
+        assert_eq!(PlayerEntry::LEN, 8 + 32 + 32 + 1);
+    }
 }
