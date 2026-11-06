@@ -21,6 +21,24 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
   programId: LEAGUE_ESCROW_PROGRAM_ID,
 };
 
+export enum LeagueStatus {
+  Open = "Open",
+  Locked = "Locked",
+  Resolved = "Resolved",
+  Cancelled = "Cancelled",
+}
+
+export interface WinnerSplit {
+  winner: PublicKey;
+  payout: BN;
+  claimed: boolean;
+}
+
+export interface WinnerInput {
+  winner: PublicKey;
+  payout: BN;
+}
+
 /**
  * Finds the Program Derived Address (PDA) for a League account.
  */
@@ -29,7 +47,13 @@ export function findLeaguePda(
   leagueId: number | bigint | BN,
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
+  if (!admin || !PublicKey.isOnCurve(admin.toBytes())) {
+    throw new Error("Invalid admin public key");
+  }
   const bn = BN.isBN(leagueId) ? leagueId : new BN(leagueId.toString());
+  if (bn.isNeg() || bn.bitLength() > 64) {
+    throw new Error("leagueId must be an unsigned 64-bit integer");
+  }
   return PublicKey.findProgramAddressSync(
     [Buffer.from("league"), admin.toBuffer(), bn.toArrayLike(Buffer, "le", 8)],
     programId,
@@ -44,6 +68,9 @@ export function findEntryPda(
   player: PublicKey,
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
+  if (!leaguePda || !player) {
+    throw new Error("leaguePda and player public keys are required");
+  }
   return PublicKey.findProgramAddressSync(
     [Buffer.from("entry"), leaguePda.toBuffer(), player.toBuffer()],
     programId,
@@ -57,6 +84,9 @@ export function findVaultPda(
   leaguePda: PublicKey,
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
+  if (!leaguePda) {
+    throw new Error("leaguePda public key is required");
+  }
   return PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), leaguePda.toBuffer()],
     programId,
