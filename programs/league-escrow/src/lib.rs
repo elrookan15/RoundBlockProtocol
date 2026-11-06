@@ -28,6 +28,16 @@ pub mod league_escrow {
         league.winners = Vec::with_capacity(max_players as usize);
         league.bump = ctx.bumps.league;
         league.vault_bump = 0;
+
+        emit!(LeagueCreated {
+            league: ctx.accounts.league.key(),
+            admin: ctx.accounts.admin.key(),
+            league_id,
+            entry_fee,
+            max_players,
+            payment_mint: None,
+        });
+
         Ok(())
     }
 
@@ -52,6 +62,16 @@ pub mod league_escrow {
         league.winners = Vec::with_capacity(max_players as usize);
         league.bump = ctx.bumps.league;
         league.vault_bump = ctx.bumps.vault;
+
+        emit!(LeagueCreated {
+            league: ctx.accounts.league.key(),
+            admin: ctx.accounts.admin.key(),
+            league_id,
+            entry_fee,
+            max_players,
+            payment_mint: Some(ctx.accounts.payment_mint.key()),
+        });
+
         Ok(())
     }
 
@@ -80,6 +100,12 @@ pub mod league_escrow {
 
         league.player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
+
+        emit!(PlayerJoined {
+            league: ctx.accounts.league.key(),
+            player: ctx.accounts.player.key(),
+            entry: ctx.accounts.entry.key(),
+        });
 
         Ok(())
     }
@@ -111,6 +137,12 @@ pub mod league_escrow {
         league.player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
 
+        emit!(PlayerJoined {
+            league: ctx.accounts.league.key(),
+            player: ctx.accounts.player.key(),
+            entry: ctx.accounts.entry.key(),
+        });
+
         Ok(())
     }
 
@@ -118,6 +150,11 @@ pub mod league_escrow {
         let league = &mut ctx.accounts.league;
         require!(league.status == LeagueStatus::Open, ErrorCode::LeagueNotOpen);
         league.status = LeagueStatus::Locked;
+
+        emit!(LeagueLocked {
+            league: ctx.accounts.league.key(),
+        });
+
         Ok(())
     }
 
@@ -158,10 +195,14 @@ pub mod league_escrow {
                 let entry_acc = ctx
                     .remaining_accounts
                     .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
+                    .find(|acc| {
+                        acc.key() == expected_entry_pda
+                            && acc.owner == ctx.program_id
+                            && acc.data_len() == PlayerEntry::LEN
+                    })
                     .ok_or(ErrorCode::InvalidWinnerEntry)?;
                 require!(
-                    entry_acc.owner == ctx.program_id,
+                    entry_acc.owner == ctx.program_id && entry_acc.data_len() == PlayerEntry::LEN,
                     ErrorCode::InvalidWinnerEntry
                 );
             }
@@ -178,6 +219,13 @@ pub mod league_escrow {
 
         league.winners = winners;
         league.status = LeagueStatus::Resolved;
+
+        emit!(LeagueResolved {
+            league: league_key,
+            winner_count: league.winners.len() as u8,
+            total_payout,
+        });
+
         Ok(())
     }
 
@@ -217,6 +265,12 @@ pub mod league_escrow {
                 .checked_add(payout)
                 .ok_or(ErrorCode::Overflow)?;
         }
+
+        emit!(PayoutClaimed {
+            league: ctx.accounts.league.key(),
+            winner: winner_pubkey,
+            payout,
+        });
 
         Ok(())
     }
@@ -260,6 +314,12 @@ pub mod league_escrow {
             token::transfer(cpi_ctx, payout)?;
         }
 
+        emit!(PayoutClaimed {
+            league: ctx.accounts.league.key(),
+            winner: winner_pubkey,
+            payout,
+        });
+
         Ok(())
     }
 
@@ -267,6 +327,11 @@ pub mod league_escrow {
         let league = &mut ctx.accounts.league;
         require!(league.status == LeagueStatus::Open, ErrorCode::LeagueNotOpen);
         league.status = LeagueStatus::Cancelled;
+
+        emit!(LeagueCancelled {
+            league: ctx.accounts.league.key(),
+        });
+
         Ok(())
     }
 
@@ -300,6 +365,12 @@ pub mod league_escrow {
 
         league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+
+        emit!(PlayerRefunded {
+            league: ctx.accounts.league.key(),
+            player: ctx.accounts.player.key(),
+            amount: entry_fee,
+        });
 
         Ok(())
     }
@@ -337,12 +408,19 @@ pub mod league_escrow {
         league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
         league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
 
+        emit!(PlayerRefunded {
+            league: ctx.accounts.league.key(),
+            player: ctx.accounts.player.key(),
+            amount: entry_fee,
+        });
+
         Ok(())
     }
 
     pub fn close_league(ctx: Context<CloseLeague>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        require!(league.payment_mint.is_none(), ErrorCode::WrongCurrency);
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -360,12 +438,22 @@ pub mod league_escrow {
             _ => return err!(ErrorCode::InvalidLeagueStatus),
         }
 
+        emit!(LeagueClosed {
+            league: ctx.accounts.league.key(),
+            admin: ctx.accounts.admin.key(),
+        });
+
         Ok(())
     }
 
     pub fn close_league_spl(ctx: Context<CloseLeagueSpl>) -> Result<()> {
         let league = &ctx.accounts.league;
         require!(league.admin == ctx.accounts.admin.key(), ErrorCode::Unauthorized);
+        let payment_mint = league.payment_mint.ok_or(ErrorCode::WrongCurrency)?;
+        require!(
+            payment_mint == ctx.accounts.payment_mint.key(),
+            ErrorCode::WrongCurrency
+        );
 
         match league.status {
             LeagueStatus::Resolved => {
@@ -402,6 +490,11 @@ pub mod league_escrow {
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
         token::close_account(cpi_ctx)?;
+
+        emit!(LeagueClosed {
+            league: ctx.accounts.league.key(),
+            admin: ctx.accounts.admin.key(),
+        });
 
         Ok(())
     }
@@ -504,6 +597,7 @@ pub struct JoinLeagueSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = player,
     )]
     pub player_token: Account<'info, TokenAccount>,
     #[account(mut)]
@@ -567,6 +661,7 @@ pub struct ClaimPayoutSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = winner,
     )]
     pub winner_token: Account<'info, TokenAccount>,
     #[account(mut)]
@@ -632,6 +727,7 @@ pub struct RefundSpl<'info> {
     #[account(
         mut,
         token::mint = payment_mint,
+        token::authority = player,
     )]
     pub player_token: Account<'info, TokenAccount>,
     #[account(mut)]
@@ -741,6 +837,60 @@ pub struct WinnerSplit {
 pub struct WinnerInput {
     pub winner: Pubkey,
     pub payout: u64,
+}
+
+#[event]
+pub struct LeagueCreated {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+    pub league_id: u64,
+    pub entry_fee: u64,
+    pub max_players: u8,
+    pub payment_mint: Option<Pubkey>,
+}
+
+#[event]
+pub struct PlayerJoined {
+    pub league: Pubkey,
+    pub player: Pubkey,
+    pub entry: Pubkey,
+}
+
+#[event]
+pub struct LeagueLocked {
+    pub league: Pubkey,
+}
+
+#[event]
+pub struct LeagueResolved {
+    pub league: Pubkey,
+    pub winner_count: u8,
+    pub total_payout: u64,
+}
+
+#[event]
+pub struct PayoutClaimed {
+    pub league: Pubkey,
+    pub winner: Pubkey,
+    pub payout: u64,
+}
+
+#[event]
+pub struct LeagueCancelled {
+    pub league: Pubkey,
+}
+
+#[event]
+pub struct PlayerRefunded {
+    pub league: Pubkey,
+    pub player: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct LeagueClosed {
+    pub league: Pubkey,
+    pub admin: Pubkey,
 }
 
 #[error_code]
