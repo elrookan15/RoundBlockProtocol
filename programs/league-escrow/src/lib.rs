@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use std::collections::BTreeSet;
 
 declare_id!("YG5dVJydevZcHJQtLNirYUseJtYQQoK83uPMznXVUbW");
 
@@ -16,7 +17,8 @@ pub mod league_escrow {
         require!(max_players > 0, ErrorCode::InvalidMaxPlayers);
 
         let league = &mut ctx.accounts.league;
-        league.admin = ctx.accounts.admin.key();
+        let admin_key = ctx.accounts.admin.key();
+        league.admin = admin_key;
         league.oracle = ctx.accounts.oracle.key();
         league.league_id = league_id;
         league.entry_fee = entry_fee;
@@ -28,6 +30,16 @@ pub mod league_escrow {
         league.winners = Vec::with_capacity(max_players as usize);
         league.bump = ctx.bumps.league;
         league.vault_bump = 0;
+
+        emit!(LeagueCreated {
+            league: league.key(),
+            admin: admin_key,
+            league_id,
+            entry_fee,
+            max_players,
+            payment_mint: None,
+        });
+
         Ok(())
     }
 
@@ -40,7 +52,9 @@ pub mod league_escrow {
         require!(max_players > 0, ErrorCode::InvalidMaxPlayers);
 
         let league = &mut ctx.accounts.league;
-        league.admin = ctx.accounts.admin.key();
+        let admin_key = ctx.accounts.admin.key();
+        let mint_key = ctx.accounts.payment_mint.key();
+        league.admin = admin_key;
         league.oracle = ctx.accounts.oracle.key();
         league.league_id = league_id;
         league.entry_fee = entry_fee;
@@ -48,10 +62,20 @@ pub mod league_escrow {
         league.player_count = 0;
         league.status = LeagueStatus::Open;
         league.total_pot = 0;
-        league.payment_mint = Some(ctx.accounts.payment_mint.key());
+        league.payment_mint = Some(mint_key);
         league.winners = Vec::with_capacity(max_players as usize);
         league.bump = ctx.bumps.league;
         league.vault_bump = ctx.bumps.vault;
+
+        emit!(LeagueCreated {
+            league: league.key(),
+            admin: admin_key,
+            league_id,
+            entry_fee,
+            max_players,
+            payment_mint: Some(mint_key),
+        });
+
         Ok(())
     }
 
@@ -73,13 +97,25 @@ pub mod league_escrow {
             anchor_lang::system_program::transfer(cpi_context, entry_fee)?;
         }
 
+        let player_key = ctx.accounts.player.key();
+        let league_key = league.key();
+
         let entry = &mut ctx.accounts.entry;
-        entry.league = league.key();
-        entry.player = ctx.accounts.player.key();
+        entry.league = league_key;
+        entry.player = player_key;
         entry.bump = ctx.bumps.entry;
 
-        league.player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
-        league.total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
+        let new_player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
+        let new_total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
+        league.player_count = new_player_count;
+        league.total_pot = new_total_pot;
+
+        emit!(PlayerJoined {
+            league: league_key,
+            player: player_key,
+            player_count: new_player_count,
+            total_pot: new_total_pot,
+        });
 
         Ok(())
     }
@@ -103,13 +139,25 @@ pub mod league_escrow {
             token::transfer(cpi_ctx, entry_fee)?;
         }
 
+        let player_key = ctx.accounts.player.key();
+        let league_key = league.key();
+
         let entry = &mut ctx.accounts.entry;
-        entry.league = league.key();
-        entry.player = ctx.accounts.player.key();
+        entry.league = league_key;
+        entry.player = player_key;
         entry.bump = ctx.bumps.entry;
 
-        league.player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
-        league.total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
+        let new_player_count = league.player_count.checked_add(1).ok_or(ErrorCode::Overflow)?;
+        let new_total_pot = league.total_pot.checked_add(entry_fee).ok_or(ErrorCode::Overflow)?;
+        league.player_count = new_player_count;
+        league.total_pot = new_total_pot;
+
+        emit!(PlayerJoined {
+            league: league_key,
+            player: player_key,
+            player_count: new_player_count,
+            total_pot: new_total_pot,
+        });
 
         Ok(())
     }
@@ -118,6 +166,13 @@ pub mod league_escrow {
         let league = &mut ctx.accounts.league;
         require!(league.status == LeagueStatus::Open, ErrorCode::LeagueNotOpen);
         league.status = LeagueStatus::Locked;
+
+        emit!(LeagueLocked {
+            league: league.key(),
+            player_count: league.player_count,
+            total_pot: league.total_pot,
+        });
+
         Ok(())
     }
 
@@ -134,34 +189,50 @@ pub mod league_escrow {
         );
 
         require!(!winner_inputs.is_empty(), ErrorCode::InvalidWinners);
+        let winners_len = winner_inputs.len();
         require!(
-            winner_inputs.len() <= league.max_players as usize,
+            winners_len <= league.max_players as usize,
+            ErrorCode::InvalidWinners
+        );
+        require!(
+            winners_len <= league.player_count as usize,
             ErrorCode::InvalidWinners
         );
 
         let league_key = league.key();
         let mut total_payout: u64 = 0;
-        let mut winners = Vec::with_capacity(winner_inputs.len());
+        let mut winners = Vec::with_capacity(winners_len);
+        let mut seen_winners = BTreeSet::new();
+
+        // If remaining_accounts are passed, pre-index them into a BTreeSet for O(1)/O(log R) membership
+        // This mitigates O(W * R) linear scans over remaining_accounts.
+        let remaining_keys: Option<BTreeSet<Pubkey>> = if !ctx.remaining_accounts.is_empty() {
+            let mut keys = BTreeSet::new();
+            for acc in ctx.remaining_accounts.iter() {
+                require!(acc.owner == ctx.program_id, ErrorCode::InvalidWinnerEntry);
+                keys.insert(acc.key());
+            }
+            Some(keys)
+        } else {
+            None
+        };
 
         for input in &winner_inputs {
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
+
+            // O(log W) duplicate check via BTreeSet instead of O(W) linear scan
             require!(
-                !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
+                seen_winners.insert(input.winner),
                 ErrorCode::InvalidWinners
             );
 
-            if !ctx.remaining_accounts.is_empty() {
+            if let Some(ref keys) = remaining_keys {
                 let (expected_entry_pda, _) = Pubkey::find_program_address(
                     &[b"entry", league_key.as_ref(), input.winner.as_ref()],
                     ctx.program_id,
                 );
-                let entry_acc = ctx
-                    .remaining_accounts
-                    .iter()
-                    .find(|acc| acc.key() == expected_entry_pda)
-                    .ok_or(ErrorCode::InvalidWinnerEntry)?;
                 require!(
-                    entry_acc.owner == ctx.program_id,
+                    keys.contains(&expected_entry_pda),
                     ErrorCode::InvalidWinnerEntry
                 );
             }
@@ -174,10 +245,16 @@ pub mod league_escrow {
         }
 
         require!(total_payout <= league.total_pot, ErrorCode::ExceedsTotalPot);
-        require!(winners.len() <= league.player_count as usize, ErrorCode::InvalidWinners);
 
         league.winners = winners;
         league.status = LeagueStatus::Resolved;
+
+        emit!(LeagueResolved {
+            league: league_key,
+            winners_count: winners_len as u8,
+            total_payout,
+        });
+
         Ok(())
     }
 
@@ -217,6 +294,13 @@ pub mod league_escrow {
                 .checked_add(payout)
                 .ok_or(ErrorCode::Overflow)?;
         }
+
+        emit!(PayoutClaimed {
+            league: league.key(),
+            winner: winner_pubkey,
+            payout,
+            payment_mint: None,
+        });
 
         Ok(())
     }
@@ -260,6 +344,13 @@ pub mod league_escrow {
             token::transfer(cpi_ctx, payout)?;
         }
 
+        emit!(PayoutClaimed {
+            league: league.key(),
+            winner: winner_pubkey,
+            payout,
+            payment_mint: Some(payment_mint),
+        });
+
         Ok(())
     }
 
@@ -267,6 +358,13 @@ pub mod league_escrow {
         let league = &mut ctx.accounts.league;
         require!(league.status == LeagueStatus::Open, ErrorCode::LeagueNotOpen);
         league.status = LeagueStatus::Cancelled;
+
+        emit!(LeagueCancelled {
+            league: league.key(),
+            total_pot: league.total_pot,
+            player_count: league.player_count,
+        });
+
         Ok(())
     }
 
@@ -298,8 +396,17 @@ pub mod league_escrow {
                 .ok_or(ErrorCode::Overflow)?;
         }
 
-        league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
-        league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+        let new_player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
+        let new_total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+        league.player_count = new_player_count;
+        league.total_pot = new_total_pot;
+
+        emit!(PlayerRefunded {
+            league: league.key(),
+            player: ctx.accounts.player.key(),
+            amount: entry_fee,
+            payment_mint: None,
+        });
 
         Ok(())
     }
@@ -334,8 +441,17 @@ pub mod league_escrow {
             token::transfer(cpi_ctx, entry_fee)?;
         }
 
-        league.player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
-        league.total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+        let new_player_count = league.player_count.checked_sub(1).ok_or(ErrorCode::Overflow)?;
+        let new_total_pot = league.total_pot.checked_sub(entry_fee).ok_or(ErrorCode::Overflow)?;
+        league.player_count = new_player_count;
+        league.total_pot = new_total_pot;
+
+        emit!(PlayerRefunded {
+            league: league.key(),
+            player: ctx.accounts.player.key(),
+            amount: entry_fee,
+            payment_mint: Some(payment_mint),
+        });
 
         Ok(())
     }
@@ -359,6 +475,12 @@ pub mod league_escrow {
             }
             _ => return err!(ErrorCode::InvalidLeagueStatus),
         }
+
+        emit!(LeagueClosed {
+            league: league.key(),
+            admin: ctx.accounts.admin.key(),
+            payment_mint: None,
+        });
 
         Ok(())
     }
@@ -402,6 +524,12 @@ pub mod league_escrow {
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
         token::close_account(cpi_ctx)?;
+
+        emit!(LeagueClosed {
+            league: league.key(),
+            admin: ctx.accounts.admin.key(),
+            payment_mint: league.payment_mint,
+        });
 
         Ok(())
     }
@@ -781,4 +909,97 @@ pub enum ErrorCode {
     InvalidLeagueStatus,
     #[msg("Invalid winner entry account.")]
     InvalidWinnerEntry,
+}
+
+#[event]
+pub struct LeagueCreated {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+    pub league_id: u64,
+    pub entry_fee: u64,
+    pub max_players: u8,
+    pub payment_mint: Option<Pubkey>,
+}
+
+#[event]
+pub struct PlayerJoined {
+    pub league: Pubkey,
+    pub player: Pubkey,
+    pub player_count: u8,
+    pub total_pot: u64,
+}
+
+#[event]
+pub struct LeagueLocked {
+    pub league: Pubkey,
+    pub player_count: u8,
+    pub total_pot: u64,
+}
+
+#[event]
+pub struct LeagueResolved {
+    pub league: Pubkey,
+    pub winners_count: u8,
+    pub total_payout: u64,
+}
+
+#[event]
+pub struct PayoutClaimed {
+    pub league: Pubkey,
+    pub winner: Pubkey,
+    pub payout: u64,
+    pub payment_mint: Option<Pubkey>,
+}
+
+#[event]
+pub struct LeagueCancelled {
+    pub league: Pubkey,
+    pub total_pot: u64,
+    pub player_count: u8,
+}
+
+#[event]
+pub struct PlayerRefunded {
+    pub league: Pubkey,
+    pub player: Pubkey,
+    pub amount: u64,
+    pub payment_mint: Option<Pubkey>,
+}
+
+#[event]
+pub struct LeagueClosed {
+    pub league: Pubkey,
+    pub admin: Pubkey,
+    pub payment_mint: Option<Pubkey>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_league_space_calculation() {
+        let space_10 = League::space(10);
+        let space_12 = League::space(12);
+        // Space should scale by (32 + 8 + 1) = 41 bytes per player
+        assert_eq!(space_12 - space_10, 2 * 41);
+        assert!(space_10 > 0);
+    }
+
+    #[test]
+    fn test_winner_deduplication_btreeset() {
+        let mut seen = BTreeSet::new();
+        let p1 = Pubkey::new_unique();
+        let p2 = Pubkey::new_unique();
+
+        assert!(seen.insert(p1));
+        assert!(seen.insert(p2));
+        // Duplicate insertion should return false
+        assert!(!seen.insert(p1));
+    }
+
+    #[test]
+    fn test_player_entry_space() {
+        assert_eq!(PlayerEntry::LEN, 8 + 32 + 32 + 1);
+    }
 }
