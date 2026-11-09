@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-11-07
+trigger_pattern: Naive nested linear search over dynamic instruction account slices (`remaining_accounts`) in Solana Anchor programs
+bad_assumption: Assumed linear scans over remaining accounts (`ctx.remaining_accounts.iter().find(...)`) are sufficiently cheap for on-chain compute unit budgets
+what_actually_happened: Nested iteration over W winners and R remaining accounts introduced an O(W * R) algorithmic bottleneck, threatening compute unit budget exhaustion during multi-winner league resolution
+corrective_rule: Pre-index dynamic remaining accounts into a sorted collection or hash set (`BTreeSet<Pubkey>`), verifying account ownership upfront in a single O(R log R) pass and reducing subsequent lookups to O(log R)
+regression_test: `cargo test --manifest-path programs/league-escrow/Cargo.toml` test case for `test_winner_deduplication_btreeset`
+confidence_adjustment: Flag nested linear searches across dynamic account slices in smart contracts as High performance risk until indexed
+source: deep-audit optimization sweep
