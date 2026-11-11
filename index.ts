@@ -21,6 +21,26 @@ export const DEFAULT_CONFIG: RoundBlockConfig = {
   programId: LEAGUE_ESCROW_PROGRAM_ID,
 };
 
+const LEAGUE_SEED = Buffer.from("league");
+const ENTRY_SEED = Buffer.from("entry");
+const VAULT_SEED = Buffer.from("vault");
+
+/**
+ * Converts a 64-bit unsigned integer (number, bigint, or BN) to a little-endian Buffer.
+ */
+export function toLe64Buffer(val: number | bigint | BN): Buffer {
+  if (BN.isBN(val)) {
+    return val.toArrayLike(Buffer, "le", 8);
+  }
+  const buf = Buffer.alloc(8);
+  if (typeof val === "bigint") {
+    buf.writeBigUInt64LE(val, 0);
+  } else {
+    buf.writeBigUInt64LE(BigInt(val), 0);
+  }
+  return buf;
+}
+
 /**
  * Finds the Program Derived Address (PDA) for a League account.
  */
@@ -29,9 +49,8 @@ export function findLeaguePda(
   leagueId: number | bigint | BN,
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
-  const bn = BN.isBN(leagueId) ? leagueId : new BN(leagueId.toString());
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("league"), admin.toBuffer(), bn.toArrayLike(Buffer, "le", 8)],
+    [LEAGUE_SEED, admin.toBuffer(), toLe64Buffer(leagueId)],
     programId,
   );
 }
@@ -58,7 +77,25 @@ export function findVaultPda(
   programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), leaguePda.toBuffer()],
+    [VAULT_SEED, leaguePda.toBuffer()],
     programId,
+  );
+}
+
+/**
+ * Batch finds the Program Derived Addresses (PDAs) for multiple Player Entry accounts.
+ * Optimizes memory and allocation overhead by reusing the league PDA buffer across computations.
+ */
+export function findMultipleEntriesPda(
+  leaguePda: PublicKey,
+  players: PublicKey[],
+  programId: PublicKey = LEAGUE_ESCROW_PROGRAM_ID,
+): [PublicKey, number][] {
+  const leagueBuffer = leaguePda.toBuffer();
+  return players.map((player) =>
+    PublicKey.findProgramAddressSync(
+      [ENTRY_SEED, leagueBuffer, player.toBuffer()],
+      programId,
+    ),
   );
 }
