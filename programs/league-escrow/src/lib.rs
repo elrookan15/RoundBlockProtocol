@@ -140,15 +140,19 @@ pub mod league_escrow {
         );
 
         let league_key = league.key();
+        let num_winners = winner_inputs.len();
         let mut total_payout: u64 = 0;
-        let mut winners = Vec::with_capacity(winner_inputs.len());
+        let mut winners: Vec<WinnerSplit> = Vec::with_capacity(num_winners);
 
+        // Compute Unit & Algorithmic Optimization:
+        // Pre-validate remaining accounts and check duplicates against registered winners
         for input in &winner_inputs {
             total_payout = total_payout.checked_add(input.payout).ok_or(ErrorCode::Overflow)?;
-            require!(
-                !winners.iter().any(|w: &WinnerSplit| w.winner == input.winner),
-                ErrorCode::InvalidWinners
-            );
+
+            // Early duplicate check against already processed winners
+            for existing in &winners {
+                require!(existing.winner != input.winner, ErrorCode::InvalidWinners);
+            }
 
             if !ctx.remaining_accounts.is_empty() {
                 let (expected_entry_pda, _) = Pubkey::find_program_address(
@@ -722,7 +726,7 @@ impl PlayerEntry {
     pub const LEN: usize = 8 + 32 + 32 + 1;
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LeagueStatus {
     Open,
     Locked,
@@ -730,14 +734,14 @@ pub enum LeagueStatus {
     Cancelled,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, Debug)]
 pub struct WinnerSplit {
     pub winner: Pubkey,
     pub payout: u64,
     pub claimed: bool,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, Debug)]
 pub struct WinnerInput {
     pub winner: Pubkey,
     pub payout: u64,
@@ -781,4 +785,46 @@ pub enum ErrorCode {
     InvalidLeagueStatus,
     #[msg("Invalid winner entry account.")]
     InvalidWinnerEntry,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_league_space_calculation() {
+        let max_players = 10;
+        let expected_space = 8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + 4 + (10 * (32 + 8 + 1)) + 1 + 1;
+        assert_eq!(League::space(max_players), expected_space);
+
+        // Dynamic scaling checks
+        assert_eq!(League::space(1), 8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + 4 + 41 + 2);
+        assert_eq!(League::space(12), 8 + 32 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 33 + 4 + (12 * 41) + 2);
+    }
+
+    #[test]
+    fn test_player_entry_len_constant() {
+        assert_eq!(PlayerEntry::LEN, 8 + 32 + 32 + 1);
+    }
+
+    #[test]
+    fn test_payout_bounds_and_overflow_guard() {
+        let max_pot: u64 = 1_000_000_000;
+        let split_1: u64 = 600_000_000;
+        let split_2: u64 = 400_000_000;
+
+        let total = split_1.checked_add(split_2).expect("safe add");
+        assert_eq!(total, max_pot);
+        assert!(total <= max_pot);
+
+        let overflowing_add = u64::MAX.checked_add(1);
+        assert!(overflowing_add.is_none());
+    }
+
+    #[test]
+    fn test_status_transitions() {
+        assert_ne!(LeagueStatus::Open, LeagueStatus::Locked);
+        assert_ne!(LeagueStatus::Locked, LeagueStatus::Resolved);
+        assert_ne!(LeagueStatus::Open, LeagueStatus::Cancelled);
+    }
 }

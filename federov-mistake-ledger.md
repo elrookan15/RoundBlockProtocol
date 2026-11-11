@@ -56,3 +56,14 @@ corrective_rule: Always pair PDA account closures with checked decrements on par
 regression_test: `tests/league-escrow.ts` test case for "Cancel and Refund Path with State Integrity Checks"
 confidence_adjustment: Lower default confidence on partial state teardown routines until state invariants are verified post-execution
 source: audit sweep
+
+## M-006
+
+date: 2026-09-14
+trigger_pattern: Repeated seed buffer allocation and un-indexed multi-player PDA derivation in client SDK
+bad_assumption: Assumed instantiating fresh `Buffer.from("entry")` and calling `leaguePda.toBuffer()` per player in loops has negligible overhead
+what_actually_happened: Client-side bulk queries for large leagues (e.g., 100+ entrants) created redundant buffer allocations and memory pressure during wallet synchronization
+corrective_rule: Use static seed constants (`ENTRY_SEED`, `LEAGUE_SEED`, `VAULT_SEED`) and implement optimized batch PDA derivation helpers (`findMultipleEntriesPda`) that cache shared buffer derivations
+regression_test: `tests/sdk.test.ts` test case for "batch derives findMultipleEntriesPda matching findEntryPda"
+confidence_adjustment: Treat repeated Buffer allocations within looped PDA derivation utilities as Low performance discipline
+source: audit sweep
